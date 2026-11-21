@@ -1,16 +1,16 @@
 'use strict';
 /* =========================================================
-   우리의 섬 — 예찬 & 예형
+   우리의 섬 — 찬이 & 형이
    설정은 여기서 바꾸면 돼요 (이름, 날짜, 편지 내용)
    ========================================================= */
 const CONFIG = {
   players: {
-    dog: { name: '예찬', animal: '강아지', emoji: '🐶' },
-    cat: { name: '예형', animal: '고양이', emoji: '🐱' },
+    dog: { name: '찬이', animal: '강아지', emoji: '🐶' },
+    cat: { name: '형이', animal: '고양이', emoji: '🐱' },
   },
   anniversary: '2026-11-19',               // 사귄 날 (이 날이 1일)
   birthdays: { dog: [4, 6], cat: [8, 2] },  // [월, 일]
-  letter: { to: 'cat', from: 'dog', text: '예형아 사랑해 ♥' },
+  letter: { to: 'cat', from: 'dog', text: '형이야 사랑해 ♥' },
   room: 'yy-ourisland-1119',                // 둘만의 방 이름 (바꾸면 새 섬)
 };
 
@@ -608,6 +608,7 @@ addEventListener('keydown', (e) => {
   if (/^Digit[1-4]$/.test(e.code)) doEmote(+e.code.slice(5) - 1);
   if (e.code === 'KeyM') toggleMic();
   if (e.code === 'KeyP') takePhoto();
+  if (e.code === 'KeyR') toggleRec();
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
@@ -731,6 +732,54 @@ function takePhoto() {
   toast('📸 찰칵! 사진을 저장했어요');
 }
 $('#photoBtn').addEventListener('click', takePhoto);
+
+/* ---------- recording (gameplay + voice -> file on this computer) ----------
+   둘 다 볼 수 있게 작은 '녹화 중' 표시가 켜져요. */
+let recorder = null, recChunks = [], recOn = false, partnerRec = false;
+function recSupported() { return typeof MediaRecorder !== 'undefined' && !!canvas.captureStream; }
+function updateRecUI() {
+  const dot = $('#recDot');
+  if (recOn) { dot.textContent = '녹화 중'; dot.classList.remove('hidden', 'partner'); }
+  else if (partnerRec) { dot.textContent = '함께 녹화 중'; dot.classList.remove('hidden'); dot.classList.add('partner'); }
+  else dot.classList.add('hidden');
+  $('#recBtn').classList.toggle('on', recOn);
+}
+function startRec() {
+  if (recorder || !recSupported()) { if (!recSupported()) toast('이 브라우저에서는 녹화를 지원하지 않아요'); return; }
+  try {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    const vstream = canvas.captureStream(30);
+    const tracks = [...vstream.getVideoTracks()];
+    if (audioCtx) {
+      const dest = audioCtx.createMediaStreamDestination();
+      let any = false;
+      if (localStream) { try { audioCtx.createMediaStreamSource(localStream).connect(dest); any = true; } catch {} }
+      if (remoteAudio.srcObject) { try { audioCtx.createMediaStreamSource(remoteAudio.srcObject).connect(dest); any = true; } catch {} }
+      if (any) tracks.push(...dest.stream.getAudioTracks());
+    }
+    const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    recorder = new MediaRecorder(new MediaStream(tracks), { mimeType: mime, videoBitsPerSecond: 5e6 });
+    recChunks = [];
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+    recorder.onstop = saveRec;
+    recorder.start(1000);
+    recOn = true; send({ t: 'rec', on: 1 }); updateRecUI();
+    toast('⏺️ 녹화를 시작했어요', 1600);
+  } catch (e) { recorder = null; toast('녹화를 시작할 수 없어요'); }
+}
+function stopRec() { if (recorder) { try { recorder.stop(); } catch {} } }
+function saveRec() {
+  const blob = new Blob(recChunks, { type: 'video/webm' });
+  recChunks = []; recorder = null; recOn = false; send({ t: 'rec', on: 0 }); updateRecUI();
+  if (!blob.size) return;
+  const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `우리의섬_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.webm`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 15000);
+}
+function toggleRec() { if (recorder) stopRec(); else startRec(); }
+$('#recBtn').addEventListener('click', toggleRec);
+addEventListener('beforeunload', () => { if (recorder) try { recorder.stop(); } catch {} });
 $('#actBtn').addEventListener('click', () => { if (modalOpen) closeLetter(); else interact(); });
 
 /* =========================================================
@@ -836,7 +885,7 @@ function bindCall(c) {
 }
 function onPartnerLeft() {
   if (!partner.present && !conn) return;
-  conn = null; partner.present = false; me.holding = false; holdReqFrom = 0; remoteAn = null;
+  conn = null; partner.present = false; me.holding = false; holdReqFrom = 0; remoteAn = null; partnerRec = false; updateRecUI();
   if (mediaCall) { try { mediaCall.close(); } catch {} mediaCall = null; }
   if (partner.a) partner.a.root.visible = false;
   toast(`${nick(partnerName())}가 섬을 떠났어요 👋`);
@@ -876,6 +925,7 @@ function onData(m) {
     case 'holdRelease': me.holding = false; break;
     case 'hint': if ((m.n | 0) > hintProgress) { setHintProgress(m.n); toast(`🗒️ ${subj(partnerName())} 쪽지 ${hintProgress}을 찾았어요!`, 3500); } break;
     case 'letter': toast(`💌 ${subj(partnerName())} 숨겨진 편지를 찾았어요!`, 4000); break;
+    case 'rec': partnerRec = !!(m.on | 0); updateRecUI(); break;
   }
 }
 let sendAcc = 0;
@@ -1009,7 +1059,7 @@ function pick(k) {
 const myNameFor = (k) => nick(CONFIG.players[k].name);
 document.querySelectorAll('.char').forEach(c => c.addEventListener('click', () => pick(c.dataset.who)));
 if (chosen) pick(chosen);
-if (window.__PREVIEW) { $('#soloBtn').classList.add('hidden'); $('#photoBtn').classList.add('hidden'); document.querySelector('.tiny').textContent = '미리보기 모드예요. 혼자 섬을 둘러볼 수 있어요. 둘이 같이 하기와 보이스는 index.html 파일로 열어야 돼요.'; }
+if (window.__PREVIEW) { $('#soloBtn').classList.add('hidden'); $('#photoBtn').classList.add('hidden'); $('#recBtn').classList.add('hidden'); document.querySelector('.tiny').textContent = '미리보기 모드예요. 혼자 섬을 둘러볼 수 있어요. 둘이 같이 하기와 보이스는 index.html 파일로 열어야 돼요.'; }
 
 async function start(isSolo) {
   if (!chosen) return;

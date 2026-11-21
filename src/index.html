@@ -51,6 +51,11 @@ button{font-family:inherit;color:inherit;cursor:pointer;border:none}
 @keyframes float{50%{transform:translateX(-50%) translateY(-4px)}}
 @media (max-width:700px){#banner{top:calc(112px + env(safe-area-inset-top));font-size:17px;padding:8px 16px}#topLeft .pill{font-size:14px;padding:6px 12px}#dday{font-size:15px!important}}
 #prompt{position:absolute;bottom:calc(150px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);font-size:18px;white-space:nowrap}
+#recDot{position:absolute;top:calc(58px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);background:rgba(255,250,243,.94);color:#e23b3b;border-radius:999px;padding:5px 14px;font-size:14px;box-shadow:var(--shadow);display:flex;align-items:center;gap:4px}
+#recDot.partner{color:#c76a2a}
+#recDot::before{content:'';width:9px;height:9px;border-radius:50%;background:currentColor;margin-right:2px;animation:blink 1.1s ease-in-out infinite}
+.ib.on{background:#e23b3b;color:#fff}
+@keyframes blink{50%{opacity:.25}}
 #toast{position:absolute;top:30%;left:50%;transform:translateX(-50%);font-size:19px;text-align:center;max-width:calc(100% - 32px);
   transition:opacity .4s;opacity:0}
 #toast.show{opacity:1}
@@ -101,6 +106,7 @@ body.touch #joy{display:block}
   </div>
   <div id="banner" class="hidden"></div>
   <div id="prompt" class="pill hidden"></div>
+  <div id="recDot" class="hidden">녹화 중</div>
   <div id="toast" class="pill"></div>
   <div id="keys" class="pill">
     이동 WASD·방향키 · 달리기 Shift<br>
@@ -116,6 +122,7 @@ body.touch #joy{display:block}
       <button class="ib" data-emote="3" title="졸려 (4)">😴</button>
     </div>
     <div class="row" style="align-items:center">
+      <button class="ib" id="recBtn" title="녹화 (R)">⏺️</button>
       <button class="ib" id="photoBtn" title="사진 (P)">📷</button>
       <button class="ib" id="micBtn" title="마이크 (M)">🎙️</button>
       <button id="actBtn" class="dim" title="상호작용 (E)">✋</button>
@@ -126,10 +133,10 @@ body.touch #joy{display:block}
 <div id="title">
   <div class="title-card">
     <h1>🏝️ 우리의 섬</h1>
-    <p class="sub">예찬 &amp; 예형의 작은 섬</p>
+    <p class="sub">찬이 &amp; 형이의 작은 섬</p>
     <div class="chars">
-      <button class="char" data-who="dog"><div class="emoji">🐶</div><div class="nm">예찬</div><div class="an">강아지</div></button>
-      <button class="char" data-who="cat"><div class="emoji">🐱</div><div class="nm">예형</div><div class="an">고양이</div></button>
+      <button class="char" data-who="dog"><div class="emoji">🐶</div><div class="nm">찬이</div><div class="an">강아지</div></button>
+      <button class="char" data-who="cat"><div class="emoji">🐱</div><div class="nm">형이</div><div class="an">고양이</div></button>
     </div>
     <button class="go" id="goBtn" disabled>누구로 들어갈까요?</button>
     <button class="solo" id="soloBtn">혼자 둘러보기</button>
