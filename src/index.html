@@ -80,6 +80,11 @@ body.touch #joy{display:block}
 .paper .body{font-family:'Gaegu',cursive;font-weight:700;font-size:34px;line-height:40px;margin:16px 0 18px;white-space:pre-wrap;color:#d94f7a}
 .paper .from{font-family:'Gaegu',cursive;font-size:22px;text-align:right;color:var(--ink-soft)}
 .paper button{display:block;margin:18px auto 0;padding:10px 26px;border-radius:14px;background:var(--pink);color:#fff;font-size:18px}
+.paper .body.hint{font-size:27px;line-height:40px;color:var(--ink);margin:12px 0}
+#hintPill{font-size:15px;color:var(--ink)}
+.hl{font-family:'Gaegu',cursive;font-size:20px;line-height:1.35;margin:10px 0;color:var(--ink)}
+.hl b{color:#d94f7a;margin-right:6px}
+.paper{max-height:calc(100% - 32px);overflow-y:auto}
 .secret{text-align:center;font-size:20px;line-height:1.6;color:var(--ink);font-family:'Jua',sans-serif}
 .secret small{display:block;color:var(--ink-soft);font-size:14px;margin-top:8px}
 .ghost{background:none!important;color:var(--ink-soft)!important;text-decoration:underline;font-size:14px!important;margin-top:6px!important;padding:4px!important}
@@ -92,6 +97,7 @@ body.touch #joy{display:block}
   <div id="topLeft">
     <div id="dday" class="pill">💕 우리 D+1</div>
     <div id="status" class="pill">연결 중...</div>
+    <button id="hintPill" class="pill">🗒️ 쪽지 0/4</button>
   </div>
   <div id="banner" class="hidden"></div>
   <div id="prompt" class="pill hidden"></div>

@@ -116,9 +116,9 @@ const stars = (() => {
 /* =========================================================
    world
    ========================================================= */
-const R_GRASS = 30, R_SAND = 35;
+const R_GRASS = 60, R_SAND = 66;
 const colliders = []; // {x,z,r}
-const PIER = { x0: -42, x1: -29, z: 8, w: 1.2 };
+const PIER = { x0: -72, x1: -59, z: 16, w: 1.2 };
 function onPier(x, z) { return x > PIER.x0 && x < PIER.x1 + 1 && Math.abs(z - PIER.z) < PIER.w; }
 function groundY(x, z) {
   if (onPier(x, z) && Math.hypot(x, z) > R_GRASS - 0.5) return 0.08;
@@ -129,35 +129,51 @@ function walkable(x, z) {
   if (Math.hypot(x, z) > R_SAND - 1.2) return false;
   return true;
 }
+const _m4 = new THREE.Matrix4(), _m4b = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color();
+// one draw call for many copies of the same shape
+function instanced(geo, items, { shadow = true } = {}) { // items: [{m: Matrix4, c: color}]
+  const im = new THREE.InstancedMesh(geo, mat(0xffffff), Math.max(1, items.length));
+  items.forEach((it, i) => { im.setMatrixAt(i, it.m); im.setColorAt(i, _c.set(it.c)); });
+  im.count = items.length; im.castShadow = shadow; im.receiveShadow = true; im.frustumCulled = false; scene.add(im); return im;
+}
+const flatM = (x, y, z, s, sx = s, sz = s) => new THREE.Matrix4().compose(_v.set(x, y, z), _q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2), _s.set(sx, sz, 1));
 
 // island
-mesh(new THREE.CylinderGeometry(R_GRASS, R_GRASS + 0.5, 3, 72), mat(0x8fd16a), 0, -1.5, 0, scene, false);
-mesh(new THREE.CylinderGeometry(R_SAND, R_SAND + 3, 2.4, 72), mat(0xf3dfa9), 0, -1.42, 0, scene, false);
-// grass tufts color patches
-{
-  const r = rng(3), g = new THREE.CircleGeometry(1, 7);
-  for (let i = 0; i < 60; i++) {
-    const a = r() * 6.28, d = 3 + r() * 25, m = mesh(g, mat(r() > 0.5 ? 0x7cc35a : 0xa2dc7a), Math.cos(a) * d, 0.01, Math.sin(a) * d, scene, false);
-    m.rotation.x = -Math.PI / 2; m.scale.setScalar(1 + r() * 2.5);
-  }
+mesh(new THREE.CylinderGeometry(R_GRASS, R_GRASS + 0.5, 3, 120), mat(0x8fd16a), 0, -1.5, 0, scene, false);
+mesh(new THREE.CylinderGeometry(R_SAND, R_SAND + 3, 2.4, 120), mat(0xf3dfa9), 0, -1.42, 0, scene, false);
+{ // grass patches
+  const r = rng(3), items = [];
+  for (let i = 0; i < 240; i++) { const a = r() * 6.28, d = 3 + r() * 55; items.push({ m: flatM(Math.cos(a) * d, 0.01, Math.sin(a) * d, 1 + r() * 2.8), c: r() > 0.5 ? 0x7cc35a : 0xa2dc7a }); }
+  instanced(new THREE.CircleGeometry(1, 7), items, { shadow: false });
 }
 // ocean
 const ocean = (() => {
-  const g = new THREE.PlaneGeometry(500, 500, 56, 56);
+  const g = new THREE.PlaneGeometry(600, 600, 64, 64);
   const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x4fc3dc, roughness: 0.35, metalness: 0.1, flatShading: true, transparent: true, opacity: 0.9 }));
   m.rotation.x = -Math.PI / 2; m.position.y = -0.55; m.receiveShadow = true; scene.add(m);
   m.userData.base = Float32Array.from(g.attributes.position.array); return m;
 })();
-const foam = mesh(new THREE.RingGeometry(R_SAND + 0.2, R_SAND + 1.1, 72), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 }), 0, -0.45, 0, scene, false);
+const foam = mesh(new THREE.RingGeometry(R_SAND + 0.2, R_SAND + 1.3, 120), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 }), 0, -0.45, 0, scene, false);
 foam.rotation.x = -Math.PI / 2;
 
-// plaza
+// plaza + paths
 mesh(new THREE.CylinderGeometry(5, 5, 0.06, 28), mat(0xe8d8c4), 0, 0.03, 0, scene, false);
-// path stones
+const PATHS = [[[0, 5], [0, 55]], [[-5, 1], [-28, 10], [-58, 16]], [[-3, -4], [-20, -14]], [[4, -3], [20, -15]], [[5, 0], [30, 2], [57, 5]]];
+function distToPaths(x, z) {
+  let best = Infinity;
+  for (const p of PATHS) for (let i = 0; i < p.length - 1; i++) {
+    const [ax, az] = p[i], [bx, bz] = p[i + 1], dx = bx - ax, dz = bz - az, t = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0, 1);
+    best = Math.min(best, Math.hypot(x - (ax + dx * t), z - (az + dz * t)));
+  }
+  return best;
+}
 {
-  const g = new THREE.CylinderGeometry(0.55, 0.6, 0.06, 8), m = mat(0xd9c7b0);
-  const path = (pts) => { for (let i = 0; i < pts.length - 1; i++) { const [ax, az] = pts[i], [bx, bz] = pts[i + 1], n = Math.ceil(Math.hypot(bx - ax, bz - az) / 1.4); for (let k = 0; k < n; k++) { const t = k / n; mesh(g, m, lerp(ax, bx, t), 0.03, lerp(az, bz, t), scene, false); } } };
-  path([[0, 5], [0, 26]]); path([[-5, 1], [-14, 5], [-29, 8]]); path([[4, -3], [10, -6]]); path([[-3, -4], [-10, -9]]);
+  const items = [];
+  for (const p of PATHS) for (let i = 0; i < p.length - 1; i++) {
+    const [ax, az] = p[i], [bx, bz] = p[i + 1], n = Math.ceil(Math.hypot(bx - ax, bz - az) / 1.4);
+    for (let k = 0; k < n; k++) { const t = k / n; items.push({ m: new THREE.Matrix4().makeTranslation(lerp(ax, bx, t), groundY(lerp(ax, bx, t), lerp(az, bz, t)) + 0.03, lerp(az, bz, t)), c: 0xd9c7b0 }); }
+  }
+  instanced(new THREE.CylinderGeometry(0.55, 0.6, 0.06, 8), items, { shadow: false });
 }
 
 // lamps
@@ -169,32 +185,52 @@ function lamp(x, z) {
   const l = new THREE.PointLight(0xffc870, 0, 14, 1.6); l.position.set(x, 2.7, z); scene.add(l); lampLights.push(l);
   colliders.push({ x, z, r: 0.25 });
 }
-lamp(3.5, 3.5); lamp(-2, 24);
+lamp(3.5, 3.5); lamp(-2, 50); lamp(-30, 12); lamp(19, -12); lamp(40, 4.5);
 
-// trees
-function tree(x, z, kind, s = 1) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); g.scale.setScalar(s); scene.add(g);
-  mesh(new THREE.CylinderGeometry(0.22, 0.32, 1.6, 6), mat(0x9b6b43), 0, 0.8, 0, g);
-  if (kind === 0) { // round
-    const c = [0x6cc05a, 0x5fb34f, 0x7fd06a][Math.floor(Math.random() * 3)];
-    mesh(new THREE.IcosahedronGeometry(1.35, 0), mat(c), 0, 2.4, 0, g);
-    mesh(new THREE.IcosahedronGeometry(0.95, 0), mat(c), 0.6, 3.1, 0.2, g);
-  } else if (kind === 1) { // pine
-    mesh(new THREE.ConeGeometry(1.4, 1.8, 7), mat(0x3f9c5a), 0, 2.0, 0, g);
-    mesh(new THREE.ConeGeometry(1.1, 1.5, 7), mat(0x48aa62), 0, 2.9, 0, g);
-    mesh(new THREE.ConeGeometry(0.75, 1.2, 7), mat(0x52b86b), 0, 3.7, 0, g);
-  } else { // pink blossom
-    mesh(new THREE.IcosahedronGeometry(1.3, 0), mat(0xffb7cf), 0, 2.4, 0, g);
-    mesh(new THREE.IcosahedronGeometry(0.85, 0), mat(0xffc9da), -0.55, 3.0, 0.3, g);
+// trees (collected, then drawn with instancing)
+const treeSpecs = [];
+function tree(x, z, kind, s = 1) { treeSpecs.push({ x, z, kind, s, rot: Math.random() * 6.28, g: Math.floor(Math.random() * 3) }); colliders.push({ x, z, r: 0.45 * s }); }
+function buildTrees() {
+  const P = {
+    trunk: [new THREE.CylinderGeometry(0.22, 0.32, 1.6, 6), []], roundA: [new THREE.IcosahedronGeometry(1.35, 0), []], roundB: [new THREE.IcosahedronGeometry(0.95, 0), []],
+    pine1: [new THREE.ConeGeometry(1.4, 1.8, 7), []], pine2: [new THREE.ConeGeometry(1.1, 1.5, 7), []], pine3: [new THREE.ConeGeometry(0.75, 1.2, 7), []],
+    blA: [new THREE.IcosahedronGeometry(1.3, 0), []], blB: [new THREE.IcosahedronGeometry(0.85, 0), []],
+  };
+  const greens = [0x6cc05a, 0x5fb34f, 0x7fd06a], pinks = [0xffb7cf, 0xffa6c4, 0xffc9da];
+  for (const t of treeSpecs) {
+    const base = new THREE.Matrix4().compose(_v.set(t.x, 0, t.z), _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), t.rot), _s.setScalar(t.s));
+    t.parts = [];
+    const add = (k, x, y, z, c) => { const it = { m: base.clone().multiply(_m4b.makeTranslation(x, y, z)), c }; P[k][1].push(it); if (k !== 'trunk') t.parts.push([k, P[k][1].length - 1, it.m]); };
+    add('trunk', 0, 0.8, 0, 0x9b6b43);
+    if (t.kind === 0) { add('roundA', 0, 2.4, 0, greens[t.g]); add('roundB', 0.6, 3.1, 0.2, greens[t.g]); }
+    else if (t.kind === 1) { add('pine1', 0, 2.0, 0, 0x3f9c5a); add('pine2', 0, 2.9, 0, 0x48aa62); add('pine3', 0, 3.7, 0, 0x52b86b); }
+    else { add('blA', 0, 2.4, 0, pinks[t.g]); add('blB', -0.55, 3.0, 0.3, pinks[(t.g + 1) % 3]); }
   }
-  colliders.push({ x, z, r: 0.45 * s });
-  return g;
+  const meshes = {};
+  for (const k in P) if (P[k][1].length) meshes[k] = instanced(P[k][0], P[k][1]);
+  for (const t of treeSpecs) { t.parts = t.parts.map(([k, i, m]) => [meshes[k], i, m]); t.hidden = false; }
+}
+// hide tree tops that stand between the camera and the players
+const ZERO_M = new THREE.Matrix4().makeScale(0, 0, 0);
+function updateTreeOcclusion(cam, targets) {
+  const dirty = new Set();
+  for (const t of treeSpecs) {
+    let hide = false;
+    for (const p of targets) {
+      const ax = cam.x, az = cam.z, dx = p.x - ax, dz = p.z - az, L2 = dx * dx + dz * dz; if (L2 < 1e-3) continue;
+      const u = ((t.x - ax) * dx + (t.z - az) * dz) / L2; if (u < 0 || u > 1.08) continue;
+      const d = Math.hypot(t.x - (ax + dx * u), t.z - (az + dz * u)); if (d < 1.4 * t.s + 0.6) { hide = true; break; }
+      if (Math.hypot(t.x - p.x, t.z - p.z) < 1.6 * t.s && u > 0.75) { hide = true; break; }
+    }
+    if (hide !== t.hidden) { t.hidden = hide; for (const [im, i, m] of t.parts) { im.setMatrixAt(i, hide ? ZERO_M : m); dirty.add(im); } }
+  }
+  dirty.forEach(im => (im.instanceMatrix.needsUpdate = true));
 }
 // palm on sand
 function palm(x, z, rot) {
   const g = new THREE.Group(); g.position.set(x, groundY(x, z), z); g.rotation.y = rot; scene.add(g);
-  for (let i = 0; i < 6; i++) { const seg = mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.7, 6), mat(0xb5895a), 0.12 * i * i * 0.18, 0.35 + i * 0.65, 0, g); seg.rotation.z = -0.06 * i; }
-  for (let i = 0; i < 6; i++) { const l = mesh(new THREE.ConeGeometry(0.35, 2.2, 4), mat(0x58b45a), 0.6, 4.1, 0, g); l.rotation.set(0, (i / 6) * 6.28, 0); l.rotateZ(1.9); l.position.set(0.6 + Math.cos(i) * 0.1, 4.0, 0); }
+  for (let i = 0; i < 5; i++) { const seg = mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.85, 6), mat(0xb5895a), 0.03 * i * i, 0.42 + i * 0.8, 0, g); seg.rotation.z = -0.06 * i; }
+  for (let i = 0; i < 5; i++) { const l = mesh(new THREE.ConeGeometry(0.35, 2.2, 4), mat(0x58b45a), 0.6, 4.1, 0, g); l.rotation.set(0, (i / 5) * 6.28, 0); l.rotateZ(1.9); l.position.set(0.6, 4.0, 0); }
   colliders.push({ x, z, r: 0.35 });
 }
 // rocks
@@ -203,29 +239,34 @@ function rock(x, z, s, col = 0x9aa0a8) {
   m.rotation.set(Math.random(), Math.random() * 6, Math.random()); m.scale.y = 0.7;
   colliders.push({ x, z, r: s * 0.85 });
 }
+const polar = (deg, r) => [Math.cos((deg * Math.PI) / 180) * r, Math.sin((deg * Math.PI) / 180) * r];
 
 // house
 const windowMat = mat(0xfff0b0, { emissive: 0xffc860, emissiveIntensity: 0 });
+const HOUSE = { x: -24, z: -18 };
+let mailboxPos;
 {
-  const g = new THREE.Group(); g.position.set(-12, 0, -9); g.rotation.y = 0.5; scene.add(g);
+  const g = new THREE.Group(); g.position.set(HOUSE.x, 0, HOUSE.z); g.rotation.y = 0.5; scene.add(g);
   mesh(new THREE.BoxGeometry(4.4, 2.8, 3.6), mat(0xfff1dd), 0, 1.4, 0, g);
   const roof = mesh(new THREE.ConeGeometry(3.7, 2, 4), mat(0xe77f7f), 0, 3.8, 0, g); roof.rotation.y = Math.PI / 4; roof.scale.z = 0.85;
   mesh(new THREE.BoxGeometry(1, 1.7, 0.1), mat(0xa0704a), 0, 0.85, 1.82, g);
   mesh(new THREE.SphereGeometry(0.07, 6, 6), mat(0xffd34d), 0.33, 0.9, 1.9, g);
   for (const wx of [-1.4, 1.4]) { mesh(new THREE.BoxGeometry(0.8, 0.8, 0.1), windowMat, wx, 1.6, 1.82, g, false); }
-  mesh(new THREE.BoxGeometry(0.5, 0.9, 0.5), mat(0xc9746a), 1.2, 4.2, -0.4, g); // chimney
-  // mailbox
-  mesh(new THREE.CylinderGeometry(0.06, 0.06, 1, 6), mat(0x8a6a4a), 2.6, 0.5, 2.2, g);
-  mesh(new THREE.BoxGeometry(0.4, 0.35, 0.55), mat(0xff8fab), 2.6, 1.1, 2.2, g);
-  for (let i = 0; i < 5; i++) colliders.push({ x: -12 + Math.cos(0.5) * (i - 2) * 1.0, z: -9 - Math.sin(0.5) * (i - 2) * 1.0, r: 2.0 });
+  mesh(new THREE.BoxGeometry(0.5, 0.9, 0.5), mat(0xc9746a), 1.2, 4.2, -0.4, g);
+  mesh(new THREE.CylinderGeometry(0.06, 0.06, 1, 6), mat(0x8a6a4a), 3.2, 0.5, 2.6, g);
+  mesh(new THREE.BoxGeometry(0.4, 0.35, 0.55), mat(0xff8fab), 3.2, 1.1, 2.6, g);
+  g.updateMatrixWorld(true);
+  mailboxPos = g.localToWorld(new THREE.Vector3(3.2, 1.33, 2.6));
+  for (let i = -2; i <= 2; i++) { const p = g.localToWorld(new THREE.Vector3(i, 0, 0)); colliders.push({ x: p.x, z: p.z, r: 2.0 }); }
 }
 // pond
+const POND = { x: 24, z: -22 };
 {
-  const p = mesh(new THREE.CircleGeometry(3.4, 20), new THREE.MeshStandardMaterial({ color: 0x6fd0e6, roughness: 0.2, flatShading: true }), 12, 0.04, -11, scene, false);
+  const p = mesh(new THREE.CircleGeometry(3.4, 20), new THREE.MeshStandardMaterial({ color: 0x6fd0e6, roughness: 0.2, flatShading: true }), POND.x, 0.04, POND.z, scene, false);
   p.rotation.x = -Math.PI / 2;
-  const rim = mesh(new THREE.RingGeometry(3.3, 3.8, 20), mat(0xc9c2b8), 12, 0.035, -11, scene, false); rim.rotation.x = -Math.PI / 2;
-  for (const [dx, dz] of [[1, 0.5], [-1.2, -0.8], [0.3, -1.6]]) { const l = mesh(new THREE.CircleGeometry(0.45, 8), mat(0x6fbf57), 12 + dx, 0.06, -11 + dz, scene, false); l.rotation.x = -Math.PI / 2; }
-  colliders.push({ x: 12, z: -11, r: 3.4 });
+  const rim = mesh(new THREE.RingGeometry(3.3, 3.8, 20), mat(0xc9c2b8), POND.x, 0.035, POND.z, scene, false); rim.rotation.x = -Math.PI / 2;
+  for (const [dx, dz] of [[1, 0.5], [-1.2, -0.8], [0.3, -1.6]]) { const l = mesh(new THREE.CircleGeometry(0.45, 8), mat(0x6fbf57), POND.x + dx, 0.06, POND.z + dz, scene, false); l.rotation.x = -Math.PI / 2; }
+  colliders.push({ x: POND.x, z: POND.z, r: 3.4 });
 }
 // pier
 {
@@ -233,12 +274,50 @@ const windowMat = mat(0xfff0b0, { emissive: 0xffc860, emissiveIntensity: 0 });
   mesh(new THREE.BoxGeometry(len, 0.18, PIER.w * 2), mat(0xc19a6b), (PIER.x0 + PIER.x1 + 1) / 2, 0.0, PIER.z);
   for (let x = PIER.x0 + 0.5; x < PIER.x1; x += 2.5) for (const s of [-1, 1]) mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.4, 6), mat(0x8a6a4a), x, -0.5, PIER.z + s * (PIER.w - 0.1));
 }
+// lighthouse
+const LIGHTHOUSE = { x: 62.5, z: 6 };
+{
+  const g = new THREE.Group(); g.position.set(LIGHTHOUSE.x, groundY(LIGHTHOUSE.x, LIGHTHOUSE.z), LIGHTHOUSE.z); scene.add(g);
+  for (let i = 0; i < 5; i++) mesh(new THREE.CylinderGeometry(1.3 - i * 0.14 - 0.14, 1.3 - i * 0.14, 1.6, 12), mat(i % 2 ? 0xe86a6a : 0xffffff), 0, 0.8 + i * 1.6, 0, g);
+  mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.2, 12), mat(0x4a4a5a), 0, 8.1, 0, g);
+  const lampTop = mesh(new THREE.CylinderGeometry(0.55, 0.55, 1, 10), mat(0xfff2c0, { emissive: 0xffe08a, emissiveIntensity: 0.3 }), 0, 8.7, 0, g, false); lampBulbs.push(lampTop);
+  const roof = mesh(new THREE.ConeGeometry(0.9, 0.9, 10), mat(0xe86a6a), 0, 9.6, 0, g);
+  mesh(new THREE.BoxGeometry(0.7, 1.2, 0.1), mat(0x8a6a4a), -1.17, 0.6, 0, g).rotation.y = Math.PI / 2;
+  colliders.push({ x: LIGHTHOUSE.x, z: LIGHTHOUSE.z, r: 1.5 });
+}
+// the oldest tree (giant pink tree in the pink forest)
+const GIANT = { x: 34, z: 40 };
+{
+  const g = new THREE.Group(); g.position.set(GIANT.x, 0, GIANT.z); scene.add(g);
+  mesh(new THREE.CylinderGeometry(0.7, 1.2, 5.5, 8), mat(0x8a5a38), 0, 2.75, 0, g);
+  for (const [x, y, z, s] of [[0, 6.5, 0, 3], [2.2, 5.8, 0.8, 2], [-2, 6, -0.6, 2.1], [0.4, 8, -0.8, 2], [-0.8, 5.4, 2, 1.7], [1, 5.5, -2.2, 1.7]])
+    mesh(new THREE.IcosahedronGeometry(s, 0), mat([0xffa6c4, 0xffb7cf, 0xff9dbd][Math.floor(Math.random() * 3)]), x, y, z, g);
+  for (let i = 0; i < 4; i++) { const rt = mesh(new THREE.CylinderGeometry(0.15, 0.35, 1.8, 5), mat(0x8a5a38), 0, 0.2, 0, g); rt.rotation.set(0, (i / 4) * 6.28 + 0.4, 1.25); rt.position.set(Math.cos((i / 4) * 6.28 + 0.4) * 1.3, 0.2, -Math.sin((i / 4) * 6.28 + 0.4) * 1.3); }
+  const petals = []; const r = rng(11);
+  for (let i = 0; i < 40; i++) { const a = r() * 6.28, d = 2 + r() * 5; petals.push({ m: flatM(GIANT.x + Math.cos(a) * d, 0.02, GIANT.z + Math.sin(a) * d, 0.12 + r() * 0.1), c: 0xffb7cf }); }
+  instanced(new THREE.CircleGeometry(1, 5), petals, { shadow: false });
+  colliders.push({ x: GIANT.x, z: GIANT.z, r: 1.7 });
+}
+
+// tree stump with mushrooms in the middle of the pine forest
+const STUMP = { x: -34, z: -38 };
+{
+  const g = new THREE.Group(); g.position.set(STUMP.x, 0, STUMP.z); scene.add(g);
+  mesh(new THREE.CylinderGeometry(0.75, 0.9, 0.6, 9), mat(0x9b6b43), 0, 0.3, 0, g);
+  mesh(new THREE.CylinderGeometry(0.72, 0.72, 0.04, 9), mat(0xd9b48a), 0, 0.61, 0, g);
+  for (const [x, z, s, c] of [[1.1, 0.4, 1, 0xe85d5d], [0.9, -0.6, 0.7, 0xe85d5d], [-1.0, 0.7, 0.8, 0xf0a35e], [-0.3, 1.2, 0.6, 0xe85d5d]]) {
+    mesh(new THREE.CylinderGeometry(0.06 * s, 0.08 * s, 0.3 * s, 6), mat(0xfff1dd), x, 0.15 * s, z, g);
+    const cap = mesh(new THREE.SphereGeometry(0.2 * s, 8, 6, 0, 6.29, 0, Math.PI / 2), mat(c), x, 0.28 * s, z, g);
+    mesh(new THREE.SphereGeometry(0.035 * s, 5, 5), mat(0xffffff), x + 0.08 * s, 0.4 * s, z, g, false);
+  }
+  colliders.push({ x: STUMP.x, z: STUMP.z, r: 0.8 });
+}
 
 // benches
 const benches = [
-  { x: 0, z: 27.2, ry: 0 },               // 해변 (바다 보기)
-  { x: -40.2, z: PIER.z, ry: -Math.PI / 2 }, // 부두 끝
-  { x: 12, z: -6.3, ry: Math.PI },         // 연못
+  { x: 0, z: 57.2, ry: 0 },                   // 북쪽 해변 (바다 보기)
+  { x: -70.2, z: PIER.z, ry: -Math.PI / 2 },  // 부두 끝
+  { x: POND.x, z: POND.z + 5.1, ry: Math.PI }, // 연못
 ];
 for (const b of benches) {
   b.y = groundY(b.x, b.z); b.f = new THREE.Vector3(Math.sin(b.ry), 0, Math.cos(b.ry)); b.r = new THREE.Vector3(Math.cos(b.ry), 0, -Math.sin(b.ry));
@@ -250,44 +329,68 @@ for (const b of benches) {
 }
 function seatPos(bi, slot) { const b = benches[bi]; return new THREE.Vector3(b.x + b.r.x * (slot ? 0.45 : -0.45) - b.f.x * 0.05, b.y, b.z + b.r.z * (slot ? 0.45 : -0.45) - b.f.z * 0.05); }
 
-// scatter trees/rocks/flowers
+// the letter: on the beach between two big rocks, walking along the shore from the lighthouse
+const LETTER_DEG = -26, [lx, lz] = polar(LETTER_DEG, 62.2);
+const letterSpot = new THREE.Vector3(lx, groundY(lx, lz), lz);
+function rockPair(deg, r = 61.6, col = 0x8e949c) {
+  const [a1, b1] = polar(deg - 2.2, r), [a2, b2] = polar(deg + 2.2, r);
+  rock(a1, b1, 1.5, col); rock(a2, b2, 1.35, 0x9aa0a8); rock(...polar(deg + 4.5, r - 1.5), 0.5);
+}
+rockPair(LETTER_DEG);
+for (const d of [40, 135, 205, 255, -70]) rockPair(d); // look-alike rock pairs
+
+// forests & scatter
 {
-  const r = rng(42), kinds = [0, 0, 1, 2];
-  const avoid = [[0, 0, 7], [-12, -9, 5.5], [12, -11, 5.5], [0, 27, 3], [0, 16, 1.5], [-14, 5, 2], [-22, 7, 2], [0, 10, 1.5], [12, -6, 2.5]];
-  let placed = 0, tries = 0;
-  while (placed < 34 && tries++ < 2000) {
-    const a = r() * 6.28, d = 7 + r() * 20, x = Math.cos(a) * d, z = Math.sin(a) * d;
-    if (avoid.some(([ax, az, ar]) => Math.hypot(x - ax, z - az) < ar)) continue;
-    if (Math.abs(x) < 1.6 && z > 0) continue; // north path
-    if (colliders.some(c => Math.hypot(c.x - x, c.z - z) < 3.2)) continue;
-    tree(x, z, kinds[Math.floor(r() * kinds.length)], 0.85 + r() * 0.5); placed++;
-  }
-  for (const [x, z, rt] of [[18, 26, 0.4], [-25, 21, -0.4], [28, 10, 1.2], [21, -24, 2.3], [-29, -9, 3.7], [6, -32, 2.8]]) palm(x, z, rt);
-  for (let i = 0; i < 14; i++) { const a = r() * 6.28, d = 8 + r() * 24, x = Math.cos(a) * d, z = Math.sin(a) * d; if (avoid.some(([ax, az, ar]) => Math.hypot(x - ax, z - az) < ar) || colliders.some(c => Math.hypot(c.x - x, c.z - z) < 2.2)) continue; rock(x, z, 0.4 + r() * 0.5); }
+  const r = rng(42);
+  const avoid = [[0, 0, 8], [HOUSE.x, HOUSE.z, 7], [POND.x, POND.z, 6.5], [0, 57, 4], [GIANT.x, GIANT.z, 4.2], [STUMP.x, STUMP.z, 3.2], [-59, 16, 4], [LIGHTHOUSE.x, LIGHTHOUSE.z, 4]];
+  const ok = (x, z, gap) => Math.hypot(x, z) < R_GRASS - 2.5 && distToPaths(x, z) > 2.2 && !avoid.some(([ax, az, ar]) => Math.hypot(x - ax, z - az) < ar) && !colliders.some(c => Math.hypot(c.x - x, c.z - z) < gap);
+  const forest = (cx, cz, rad, n, pick, gap) => { let placed = 0, tries = 0; while (placed < n && tries++ < 4000) { const a = r() * 6.28, d = Math.sqrt(r()) * rad, x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d; if (!ok(x, z, gap)) continue; tree(x, z, pick(), 0.9 + r() * 0.6); placed++; } };
+  forest(GIANT.x, GIANT.z, 14, 60, () => (r() < 0.7 ? 2 : 0), 2.3);       // 분홍 숲
+  forest(-32, -34, 14, 60, () => (r() < 0.85 ? 1 : 0), 2.3);              // 소나무 숲
+  forest(-38, 36, 10, 30, () => (r() < 0.5 ? 0 : 1), 2.6);                // 북서쪽 작은 숲
+  forest(0, 0, 57, 140, () => { const v = r(); return v < 0.55 ? 0 : v < 0.93 ? 1 : 2; }, 3.6);
+  buildTrees();
+  for (let i = 0; i < 22; i++) { const d = r() * 360; palm(...polar(d, 61.5 + r() * 2), r() * 6); }
+  for (let i = 0; i < 45; i++) { const a = r() * 6.28, d = 8 + r() * 50, x = Math.cos(a) * d, z = Math.sin(a) * d; if (!ok(x, z, 2.2)) continue; rock(x, z, 0.4 + r() * 0.6); }
 
   // flowers (instanced)
-  const cols = [0xff8fab, 0xffd166, 0xffffff, 0xc3a6ff, 0xff9f6b], N = 260;
-  const petal = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.16, 0), mat(0xffffff), N);
-  const stem = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.025, 0.025, 0.3, 4), mat(0x4f9d45), N);
-  const m4 = new THREE.Matrix4(), c = new THREE.Color();
-  let n = 0;
-  while (n < N) {
-    // clusters
-    const ca = r() * 6.28, cd = 6 + r() * 22, cx = Math.cos(ca) * cd, cz = Math.sin(ca) * cd, k = 4 + Math.floor(r() * 8), col = cols[Math.floor(r() * cols.length)];
-    for (let j = 0; j < k && n < N; j++) {
-      const x = cx + (r() - 0.5) * 2.4, z = cz + (r() - 0.5) * 2.4;
+  const cols = [0xff8fab, 0xffd166, 0xffffff, 0xc3a6ff, 0xff9f6b], petals = [], stems = [];
+  for (let tries = 0; petals.length < 900 && tries < 600; tries++) {
+    const ca = r() * 6.28, cd = 6 + r() * 52, cx = Math.cos(ca) * cd, cz = Math.sin(ca) * cd, k = 5 + Math.floor(r() * 10), col = cols[Math.floor(r() * cols.length)];
+    for (let j = 0; j < k; j++) {
+      const x = cx + (r() - 0.5) * 3, z = cz + (r() - 0.5) * 3;
       if (Math.hypot(x, z) > R_GRASS - 1 || colliders.some(cc => Math.hypot(cc.x - x, cc.z - z) < cc.r + 0.3)) continue;
-      m4.makeTranslation(x, 0.32, z); petal.setMatrixAt(n, m4); petal.setColorAt(n, c.set(col));
-      m4.makeTranslation(x, 0.15, z); stem.setMatrixAt(n, m4); n++;
+      petals.push({ m: new THREE.Matrix4().makeTranslation(x, 0.32, z), c: col }); stems.push({ m: new THREE.Matrix4().makeTranslation(x, 0.15, z), c: 0x4f9d45 });
     }
   }
-  petal.castShadow = true; scene.add(petal, stem);
+  instanced(new THREE.IcosahedronGeometry(0.16, 0), petals); instanced(new THREE.CylinderGeometry(0.025, 0.025, 0.3, 4), stems, { shadow: false });
 }
-// rocks hiding the letter
-rock(-21.3, -22.3, 1.3, 0x8e949c); rock(-19.6, -23.6, 0.8, 0x9aa0a8);
+
+/* ---------- hint notes (보물찾기 쪽지) ---------- */
+const HINTS = [
+  { pos: mailboxPos.clone(), text: '물 위에 동그란 잎사귀가\n떠 있는 곳에\n다음 쪽지를 놓아뒀어 🍃' },
+  { pos: new THREE.Vector3(POND.x + 2.9, 0.08, POND.z - 2.7), text: '바다 쪽으로 길게 뻗은\n나무 길 끝,\n벤치 옆을 살펴봐 ⚓' },
+  { pos: new THREE.Vector3(-71.4, 0.17, PIER.z - 0.85), text: '뾰족뾰족 초록 나무들이\n빽빽한 숲 한가운데,\n버섯이 자라는\n나무 그루터기를 찾아봐 🍄' },
+  { pos: new THREE.Vector3(STUMP.x + 0.2, 0.62, STUMP.z - 0.1), text: '분홍 꽃이 가득한 숲 속에\n섬에서 제일 오래된\n커다란 나무가 있어.\n그 나무 밑동을 찾아봐 🌸' },
+  { pos: new THREE.Vector3(GIANT.x - 1.9, 0.05, GIANT.z - 1.3), text: '하얀 등대에서\n해변을 따라 걷다 보면\n커다란 바위 두 개가\n나란히 있어.\n그 사이에 반짝이는 게\n숨어 있어 ✨' },
+];
+if (params.get('reset')) { store.set('hints', 0); store.set('letterFound', false); }
+let hintProgress = clamp(store.get('hints', 0) | 0, 0, HINTS.length);
+for (const h of HINTS) {
+  const g = new THREE.Group(); g.position.copy(h.pos); scene.add(g); h.obj = g;
+  const roll = mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.5, 8), mat(0xfff5e0), 0, 0.1, 0, g); roll.rotation.z = Math.PI / 2;
+  mesh(new THREE.TorusGeometry(0.105, 0.025, 5, 10), mat(0xff6f9c), 0, 0.1, 0, g).rotation.y = Math.PI / 2;
+  const sg = new THREE.BufferGeometry(), sp = new Float32Array(8 * 3); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+  h.spark = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xfff3a0, size: 0.12, transparent: true, opacity: 0.8, depthWrite: false })); g.add(h.spark);
+  h.seed = Array.from({ length: 8 }, () => [Math.random() * 6.28, Math.random()]);
+}
+function refreshHints() {
+  HINTS.forEach((h, i) => (h.obj.visible = i <= hintProgress));
+  const el = document.getElementById('hintPill'); if (el) el.textContent = `🗒️ 쪽지 ${hintProgress}/${HINTS.length}`;
+  if (typeof sparkle !== 'undefined') sparkle.visible = hintProgress >= HINTS.length;
+}
 
 /* ---------- hidden letter (bottle) ---------- */
-const letterSpot = new THREE.Vector3(-22.9, 0, -23.6); letterSpot.y = groundY(letterSpot.x, letterSpot.z);
 const bottle = new THREE.Group(); bottle.position.copy(letterSpot); scene.add(bottle);
 {
   const glass = new THREE.MeshStandardMaterial({ color: 0x9be7d8, transparent: true, opacity: 0.7, roughness: 0.1 });
@@ -433,7 +536,7 @@ const fireworks = [];
 let celebrating = false, bdayWho = null;
 function launchFirework() {
   const N = 90, g = new THREE.BufferGeometry(), pos = new Float32Array(N * 3), vel = [];
-  const cx = (Math.random() - 0.5) * 50, cy = 18 + Math.random() * 12, cz = 45 + Math.random() * 15;
+  const cx = (Math.random() - 0.5) * 90, cy = 26 + Math.random() * 16, cz = 92 + Math.random() * 20;
   for (let i = 0; i < N; i++) {
     pos.set([cx, cy, cz], i * 3);
     const th = Math.random() * 6.28, ph = Math.acos(2 * Math.random() - 1), sp = 7 + Math.random() * 2;
@@ -441,7 +544,7 @@ function launchFirework() {
   }
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   const col = [0xff8fab, 0xffd166, 0x8fd8c0, 0xc3a6ff, 0xffffff][Math.floor(Math.random() * 5)];
-  const p = new THREE.Points(g, new THREE.PointsMaterial({ color: col, size: 1.1, map: dotTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  const p = new THREE.Points(g, new THREE.PointsMaterial({ color: col, size: 1.8, map: dotTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
   p.userData = { vel, life: 0 }; scene.add(p); fireworks.push(p);
 }
 function updateFireworks(dt) {
@@ -544,14 +647,17 @@ function currentAction() {
   if (me.sit) return { icon: '🚶', text: '일어나기', fn: standUp };
   if (me.holding) return { icon: '🫳', text: '손 놓기', fn: () => { releaseHold(true); } };
   if (holdReqFrom > clock.elapsedTime && partnerDist() < 3.5) return { icon: '🤝', text: `${nick(partnerName())} 손 잡기 💕`, fn: acceptHold };
-  if (me.pos.distanceTo(letterSpot) < 2.2) return { icon: '💌', text: '반짝이는 병 열어보기', fn: openLetter };
+  const hi = HINTS.findIndex((h, i) => i <= hintProgress && Math.hypot(h.pos.x - me.pos.x, h.pos.z - me.pos.z) < 2.3);
+  if (hi >= 0) return { icon: '🗒️', text: `쪽지 읽기 (${hi + 1}/${HINTS.length})`, fn: () => openHint(hi) };
+  if (Math.hypot(letterSpot.x - me.pos.x, letterSpot.z - me.pos.z) < 2.2) return { icon: '💌', text: '반짝이는 병 열어보기', fn: openLetter };
   const bi = nearestBench(); if (bi >= 0) return { icon: '🪑', text: '벤치에 앉기', fn: () => sitDown(bi) };
   if (partnerDist() < 2.6) return { icon: '🤝', text: `${nick(partnerName())}에게 손 내밀기`, fn: requestHold };
   return null;
 }
 function interact() { const a = currentAction(); if (a) a.fn(); }
 
-function requestHold() { send({ t: 'holdReq' }); toast(`${nick(partnerName())}에게 손을 내밀었어요 🤝`); }
+let myReqUntil = 0;
+function requestHold() { myReqUntil = clock.elapsedTime + 10; send({ t: 'holdReq' }); toast(`${nick(partnerName())}에게 손을 내밀었어요 🤝`); }
 function acceptHold() { holdReqFrom = 0; setHolding(true); send({ t: 'holdAccept' }); }
 function setHolding(v) {
   me.holding = v;
@@ -591,6 +697,24 @@ function openLetter() {
   }
   $('#letter').classList.remove('hidden'); modalOpen = true;
 }
+function openHint(i) {
+  const paper = $('#paper'), last = i === HINTS.length - 1;
+  paper.innerHTML = `<div class="to">🗒️ 쪽지 ${i + 1} / ${HINTS.length}</div><div class="body hint"></div><div class="from">${last ? '거의 다 왔어! 💕' : '다음 쪽지를 찾아봐!'}</div><button id="lc">닫기</button>`;
+  paper.querySelector('.body').textContent = HINTS[i].text; paper.querySelector('#lc').onclick = closeLetter;
+  $('#letter').classList.remove('hidden'); modalOpen = true;
+  if (i + 1 > hintProgress) { setHintProgress(i + 1); send({ t: 'hint', n: hintProgress }); for (let k = 0; k < 6; k++) spawnHeart(me.pos, 0.5); }
+}
+function setHintProgress(n) { hintProgress = clamp(Math.max(hintProgress, n | 0), 0, HINTS.length); store.set('hints', hintProgress); refreshHints(); }
+function openHintList() {
+  if (modalOpen) return;
+  const paper = $('#paper');
+  const list = HINTS.slice(0, hintProgress).map((h, i) => `<div class="hl"><b>쪽지 ${i + 1}</b><span></span></div>`).join('');
+  paper.innerHTML = `<div class="to">🗒️ 찾은 쪽지 ${hintProgress} / ${HINTS.length}</div>${hintProgress ? list : '<div class="secret" style="margin:18px 0">아직 찾은 쪽지가 없어요.<small>집 앞 우편함부터 살펴봐요 📮</small></div>'}<button id="lc">닫기</button>`;
+  paper.querySelectorAll('.hl span').forEach((el, i) => (el.textContent = HINTS[i].text.replace(/\n/g, ' ')));
+  paper.querySelector('#lc').onclick = closeLetter;
+  $('#letter').classList.remove('hidden'); modalOpen = true;
+}
+$('#hintPill').addEventListener('click', openHintList);
 function closeLetter() { $('#letter').classList.add('hidden'); modalOpen = false; }
 $('#letter').addEventListener('click', (e) => { if (e.target.id === 'letter') closeLetter(); });
 
@@ -690,7 +814,7 @@ function bindConn(c, gen) {
     if (gen !== netGen) { c.close(); return; }
     if (conn && conn !== c) { try { conn.close(); } catch {} }
     conn = c;
-    send({ t: 'hi', kind: me.kind });
+    send({ t: 'hi', kind: me.kind, hints: hintProgress });
     if (!isHost) { // guest starts the voice call
       const call = peer.call(HOST_ID, localStream || silentStream());
       if (call) bindCall(call);
@@ -729,10 +853,11 @@ function onData(m) {
       const nm = CONFIG.players[k].name;
       setStatus(`💞 ${nick(nm)}와 함께`, true); toast(`${subj(nm)} 섬에 왔어요! 💕`);
       if (m.kind === me.kind) toast('둘 다 같은 캐릭터로 들어왔어요! 한 명이 다시 골라 주세요 🙈', 5000);
-      send({ t: 'hi2', kind: me.kind });
+      send({ t: 'hi2', kind: me.kind, hints: hintProgress }); if ((m.hints | 0) > hintProgress) setHintProgress(m.hints);
       break;
     }
     case 'hi2': {
+      if ((m.hints | 0) > hintProgress) setHintProgress(m.hints);
       const k = m.kind === 'dog' || m.kind === 'cat' ? m.kind : otherKind(me.kind);
       if (!partner.a || partner.kind !== k) { if (partner.a) scene.remove(partner.a.root); partner.kind = k; partner.a = makeAnimal(k); }
       partner.a.root.visible = true; partner.present = true;
@@ -746,9 +871,10 @@ function onData(m) {
       if (!partner.seen) { partner.pos.copy(partner.target); partner.ry = partner.tRy; partner.seen = true; }
       break;
     case 'emote': if (partner.a) showEmote(partner.a, m.i | 0); break;
-    case 'holdReq': holdReqFrom = clock.elapsedTime + 10; toast(`💕 ${subj(partnerName())} 손을 내밀었어요! (E로 잡기)`, 4000); break;
+    case 'holdReq': if (myReqUntil > clock.elapsedTime && !me.holding) { myReqUntil = 0; acceptHold(); break; } holdReqFrom = clock.elapsedTime + 10; toast(`💕 ${subj(partnerName())} 손을 내밀었어요! (E로 잡기)`, 4000); break;
     case 'holdAccept': setHolding(true); break;
     case 'holdRelease': me.holding = false; break;
+    case 'hint': if ((m.n | 0) > hintProgress) { setHintProgress(m.n); toast(`🗒️ ${subj(partnerName())} 쪽지 ${hintProgress}을 찾았어요!`, 3500); } break;
     case 'letter': toast(`💌 ${subj(partnerName())} 숨겨진 편지를 찾았어요!`, 4000); break;
   }
 }
@@ -764,7 +890,7 @@ function netTick(dt) {
 const clock = new THREE.Clock();
 const camPos = new THREE.Vector3(0, 12, 16), camLook = new THREE.Vector3();
 const linkMesh = mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 6), mat(0xff8fab), 0, 0, 0, scene, false); linkMesh.visible = false;
-let heartAcc = 0, fwAcc = 0, skyAcc = 99;
+let heartAcc = 0, fwAcc = 0, skyAcc = 99, occAcc = 0;
 
 function moveMe(dt) {
   if (me.sit || modalOpen) { me.moving = false; return; }
@@ -844,6 +970,7 @@ function loop() {
     }
     const ck = 1 - Math.exp(-dt * 5); camPos.lerp(wantPos, ck); camLook.lerp(wantLook, ck);
     camera.position.copy(camPos); camera.lookAt(camLook);
+    occAcc += dt; if (occAcc > 0.12) { occAcc = 0; updateTreeOcclusion(camPos, partner.present && partner.a ? [me.pos, partner.pos] : [me.pos]); }
     sun.target.position.copy(me.pos); sun.position.copy(me.pos).add(new THREE.Vector3(30, 50, 20));
 
     // prompt
@@ -860,6 +987,7 @@ function loop() {
   foam.position.y = -0.47 + Math.sin(t * 1.3) * 0.05; foam.material.opacity = 0.5 + Math.sin(t * 1.3) * 0.2;
   { const sp = sparkle.geometry.attributes.position, sd = sparkle.userData.seed; for (let i = 0; i < sd.length; i++) { const [a, r, ph] = sd[i], h = ((t * 0.4 + r) % 1); sp.array[i * 3] = Math.cos(a + t * 0.5) * 0.5; sp.array[i * 3 + 1] = 0.2 + h * 1.2; sp.array[i * 3 + 2] = Math.sin(a + t * 0.5) * 0.5; } sp.needsUpdate = true; sparkle.material.opacity = 0.6 + Math.sin(t * 4) * 0.3; }
   bottle.position.y = letterSpot.y + Math.sin(t * 2) * 0.02;
+  for (const h of HINTS) { if (!h.obj.visible) continue; const a = h.spark.geometry.attributes.position; h.seed.forEach(([ang, r0], i) => { const k = (t * 0.5 + r0) % 1; a.array[i * 3] = Math.cos(ang + t) * 0.35; a.array[i * 3 + 1] = 0.15 + k * 0.8; a.array[i * 3 + 2] = Math.sin(ang + t) * 0.35; }); a.needsUpdate = true; h.obj.rotation.y = Math.sin(t * 1.5) * 0.2; }
   for (const b of balloons) { if (b.userData.cake) b.traverse(o => { if (o.userData.flame) o.scale.setScalar(0.8 + Math.random() * 0.5); }); else b.position.y = Math.sin(t * 1.5 + b.userData.ph) * 0.15; }
   if (celebrating) { fwAcc += dt; if (fwAcc > (night > 0.5 ? 0.9 : 1.8)) { fwAcc = 0; launchFirework(); } }
   updateFireworks(dt); updateHearts(dt);
@@ -891,7 +1019,8 @@ async function start(isSolo) {
   $('#title').classList.add('hidden'); $('#hud').classList.remove('hidden');
   const n = dayCount(); $('#dday').textContent = n > 0 ? `💕 ${CONFIG.players.dog.name} ♥ ${CONFIG.players.cat.name} · ${n}일째` : `💕 D-${1 - n}`;
   setupCelebration(todaysEvents());
-  if (me.kind === CONFIG.letter.to && !store.get('letterFound', false)) setTimeout(() => toast(`✨ 해변 어딘가에 ${nick(myName())}를 위한 게 숨겨져 있대요...`, 4500), 1800);
+  refreshHints();
+  if (!store.get('letterFound', false)) setTimeout(() => toast(hintProgress ? `🗒️ 쪽지 ${hintProgress}/${HINTS.length}까지 찾았어요. 이어서 찾아봐요!` : '📮 집 앞 우편함에 쪽지가 꽂혀 있어요!', 4500), 1800);
   if (bdayWho) setTimeout(() => toast(`🎂 광장에 케이크가 있어요!`, 3500), 6500);
   if (isSolo) { setStatus('🏝️ 혼자 둘러보는 중'); $('#micBtn').classList.add('hidden'); }
   else { await initMic(); startNet(); }
@@ -903,5 +1032,5 @@ addEventListener('beforeunload', () => { try { peer && peer.destroy(); } catch {
 
 applySky();
 camPos.set(0, 14, 22); camLook.set(0, 0, 0);
-window.__game = { fps: () => fpsVal, me, partner, benches, letterSpot, send, interact, get conn() { return conn; }, get isHost() { return isHost; } };
+window.__game = { HINTS, colliders, walkable, tryMove, get hints() { return hintProgress; }, fps: () => fpsVal, me, partner, benches, letterSpot, send, interact, get conn() { return conn; }, get isHost() { return isHost; } };
 requestAnimationFrame(loop);
