@@ -406,24 +406,132 @@ function rock(x, z, s, col = 0x9aa0a8) {
 }
 const polar = (deg, r) => [Math.cos((deg * Math.PI) / 180) * r, Math.sin((deg * Math.PI) / 180) * r];
 
-// house
+// house (big, enterable)
 const windowMat = mat(0xfff0b0, { emissive: 0xffc860, emissiveIntensity: 0 });
-const HOUSE = { x: -24, z: -18 };
-let mailboxPos;
+const HOUSE = { x: -24, z: -18, ry: 0.93, hx: 6, hz: 4.5, H: 3.0 };
+const _hc = Math.cos(HOUSE.ry), _hs = Math.sin(HOUSE.ry);
+const houseLocal = (x, z, y = 0) => new THREE.Vector3(HOUSE.x + x * _hc + z * _hs, y, HOUSE.z - x * _hs + z * _hc);
+const toHouseLocal = (px, pz) => { const dx = px - HOUSE.x, dz = pz - HOUSE.z; return [dx * _hc - dz * _hs, dx * _hs + dz * _hc]; };
+function insideHouse(px, pz) { const [lx, lz] = toHouseLocal(px, pz); return Math.abs(lx) < HOUSE.hx && Math.abs(lz) < HOUSE.hz; }
+function houseBox(lx, lz, hx, hz) { const c = houseLocal(lx, lz); colliders.push({ box: true, x: c.x, z: c.z, hx, hz, rot: HOUSE.ry, r: Math.hypot(hx, hz) }); }
+function houseCircle(lx, lz, r) { const c = houseLocal(lx, lz); colliders.push({ x: c.x, z: c.z, r }); }
+const houseG = new THREE.Group(); houseG.position.set(HOUSE.x, 0, HOUSE.z); houseG.rotation.y = HOUSE.ry; scene.add(houseG);
+const wallsG = new THREE.Group(), roofG = new THREE.Group(), furnG = new THREE.Group(); houseG.add(wallsG, roofG, furnG);
+let mailboxPos, fireLight, houseLight, chimneyTop;
+const flames = [], fireLogs = [];
+const BED = { x: 3.9, z: -2.7, hx: 1.3, hz: 1.5, top: 0.65 };
 {
-  const g = new THREE.Group(); g.position.set(HOUSE.x, 0, HOUSE.z); g.rotation.y = 0.5; scene.add(g);
-  mesh(new THREE.BoxGeometry(4.4, 2.8, 3.6), mat(0xfff1dd), 0, 1.4, 0, g);
-  const roof = mesh(new THREE.ConeGeometry(3.7, 2, 4), mat(0xe77f7f), 0, 3.8, 0, g); roof.rotation.y = Math.PI / 4; roof.scale.z = 0.85;
-  mesh(new THREE.BoxGeometry(1, 1.7, 0.1), mat(0xa0704a), 0, 0.85, 1.82, g);
-  mesh(new THREE.SphereGeometry(0.07, 6, 6), mat(0xffd34d), 0.33, 0.9, 1.9, g);
-  for (const wx of [-1.4, 1.4]) { mesh(new THREE.BoxGeometry(0.8, 0.8, 0.1), windowMat, wx, 1.6, 1.82, g, false); }
-  mesh(new THREE.BoxGeometry(0.5, 0.9, 0.5), mat(0xc9746a), 1.2, 4.2, -0.4, g);
-  mesh(new THREE.CylinderGeometry(0.06, 0.06, 1, 6), mat(0x8a6a4a), 3.2, 0.5, 2.6, g);
-  mesh(new THREE.BoxGeometry(0.4, 0.35, 0.55), mat(0xff8fab), 3.2, 1.1, 2.6, g);
-  g.updateMatrixWorld(true);
-  mailboxPos = g.localToWorld(new THREE.Vector3(3.2, 1.33, 2.6));
-  for (let i = -2; i <= 2; i++) { const p = g.localToWorld(new THREE.Vector3(i, 0, 0)); colliders.push({ x: p.x, z: p.z, r: 2.0 }); }
+  const H = HOUSE.H, wallC = mat(0xfff1dd), wood = mat(0xc8875a), woodD = mat(0x8a5a38), stone = mat(0xbfb2a6);
+  const box = (sx, sy, sz, m, x, y, z, parent = furnG, shadow = true) => mesh(new THREE.BoxGeometry(sx, sy, sz), m, x, y, z, parent, shadow);
+  const cyl = (rt, rb, h, m, x, y, z, parent = furnG, seg = 10) => mesh(new THREE.CylinderGeometry(rt, rb, h, seg), m, x, y, z, parent);
+  // walls (front has a doorway in the middle)
+  box(12.3, H, 0.3, wallC, 0, H / 2, -4.5, wallsG); houseBox(0, -4.5, 6.15, 0.15);
+  box(0.3, H, 9, wallC, -6, H / 2, 0, wallsG); houseBox(-6, 0, 0.15, 4.5);
+  box(0.3, H, 9, wallC, 6, H / 2, 0, wallsG); houseBox(6, 0, 0.15, 4.5);
+  for (const s of [-1, 1]) { box(5.05, H, 0.3, wallC, s * 3.625, H / 2, 4.5, wallsG); houseBox(s * 3.625, 4.5, 2.525, 0.15); }
+  box(2.2, 0.8, 0.3, wallC, 0, H - 0.4, 4.5, roofG); // lintel (hidden in cut-away view)
+  for (const [x, z] of [[-6, -4.5], [6, -4.5], [-6, 4.5], [6, 4.5]]) box(0.45, H, 0.45, wood, x, H / 2, z, wallsG);
+  for (const x of [-1.15, 1.15]) box(0.18, H - 0.6, 0.38, wood, x, (H - 0.6) / 2, 4.5, wallsG); // door frame
+  // windows
+  const win = (x, y, z, rotY) => { const w = box(1.3, 1.1, 0.36, windowMat, x, y, z, wallsG, false); w.rotation.y = rotY; const f1 = box(1.42, 0.08, 0.4, mat(0xffffff), x, y, z, wallsG, false); f1.rotation.y = rotY; const f2 = box(0.08, 1.2, 0.4, mat(0xffffff), x, y, z, wallsG, false); f2.rotation.y = rotY; };
+  win(-3.6, 1.7, 4.5, 0); win(3.6, 1.7, 4.5, 0); win(-4.3, 2.0, -4.5, 0); win(3.9, 2.25, -4.5, 0); win(-6, 1.7, 2.6, Math.PI / 2); win(6, 1.7, 1.4, Math.PI / 2);
+  // open door, swung inward
+  const hinge = new THREE.Group(); hinge.position.set(1.05, 0, 4.3); hinge.rotation.y = -1.6; wallsG.add(hinge);
+  box(1.0, 2.2, 0.08, mat(0xa0704a), -0.5, 1.1, 0, hinge); mesh(new THREE.SphereGeometry(0.06, 6, 6), mat(0xffd34d), -0.85, 1.05, 0.07, hinge);
+  // roof + chimney (hidden when inside)
+  const roofInner = mesh(new THREE.ConeGeometry(6.6 * Math.SQRT2, 2.8, 4), mat(0xe77f7f), 0, H + 1.4, 0, roofG); roofInner.rotation.y = Math.PI / 4;
+  roofG.scale.z = 5.0 / 6.6;
+  box(0.9, 2.4, 0.9 / (5.0 / 6.6), mat(0xc9746a), -4.9, H + 1.7, -0.6 / (5.0 / 6.6), roofG);
+  chimneyTop = houseLocal(-4.9, -0.6, H + 3.0);
+  // floor + rug
+  box(11.7, 0.04, 8.7, mat(0xe2b07f), 0, 0.0, 0, furnG, false);
+  for (let x = -5.4; x <= 5.4; x += 0.9) box(0.03, 0.045, 8.7, mat(0xc99766), x, 0.0, 0, furnG, false);
+  mesh(new THREE.CylinderGeometry(1.75, 1.75, 0.03, 24), mat(0xf4b6c2), -3.0, 0.035, -0.6, furnG, false);
+  mesh(new THREE.CylinderGeometry(1.25, 1.25, 0.035, 24), mat(0xfbd3db), -3.0, 0.04, -0.6, furnG, false);
+  box(1.6, 0.03, 0.8, mat(0xff8fab), 0, 0.02, 5.2, furnG, false); // doormat outside
+
+  // fireplace on the left wall
+  box(0.9, 1.45, 2.1, stone, -5.4, 0.725, -0.6); houseBox(-5.4, -0.6, 0.45, 1.05);
+  box(0.12, 0.95, 1.2, mat(0x2a1d18), -4.95, 0.55, -0.6, furnG, false);
+  box(1.15, 0.12, 2.35, wood, -5.3, 1.5, -0.6);
+  box(0.8, H - 1.56, 1.3, stone, -5.55, 1.56 + (H - 1.56) / 2, -0.6, wallsG);
+  for (const [z, ry] of [[-0.85, 0.2], [-0.4, -0.25], [-0.62, 0]]) { const l = cyl(0.09, 0.09, 0.75, woodD, -4.85, 0.18 + (ry === 0 ? 0.13 : 0), z, furnG, 7); l.rotation.set(Math.PI / 2, ry, 0); fireLogs.push(l); }
+  for (const [c, dz, s] of [[0xff7a2e, -0.2, 1], [0xffb13b, 0.15, 0.85], [0xffe07a, -0.02, 0.6]]) {
+    const f = mesh(new THREE.ConeGeometry(0.2 * s, 0.6 * s, 6), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.92 }), -4.85, 0.45, -0.6 + dz, furnG, false);
+    f.userData = { base: 0.6 * s, ph: Math.random() * 6 }; flames.push(f);
+  }
+  fireLight = new THREE.PointLight(0xff8a3c, 5, 10, 1.4); fireLight.position.set(-4.4, 0.9, -0.6); houseG.add(fireLight);
+  // stacked firewood next to the fireplace
+  for (const [z, y] of [[1.0, 0.13], [1.3, 0.13], [1.6, 0.13], [1.15, 0.36], [1.45, 0.36], [1.3, 0.59]]) {
+    const l = cyl(0.13, 0.13, 0.9, mat(0x9b6b43), -5.35, y, z, furnG, 8); l.rotation.z = Math.PI / 2;
+    const end = cyl(0.11, 0.11, 0.02, mat(0xe6c28f), -4.89, y, z, furnG, 8); end.rotation.z = Math.PI / 2;
+  }
+  houseBox(-5.35, 1.3, 0.5, 0.45);
+  // coffee table + mugs
+  box(0.85, 0.07, 1.25, wood, -3.0, 0.42, -0.6);
+  for (const [dx, dz] of [[-0.35, -0.55], [0.35, -0.55], [-0.35, 0.55], [0.35, 0.55]]) box(0.07, 0.4, 0.07, woodD, -3.0 + dx, 0.2, -0.6 + dz);
+  for (const [dz, c] of [[-0.25, 0xff8fab], [0.2, 0x8fd8c0]]) cyl(0.07, 0.06, 0.14, mat(c), -3.0, 0.53, -0.6 + dz);
+  houseBox(-3.0, -0.6, 0.45, 0.65);
+  // sofa facing the fire
+  const sofaC = mat(0x8fbf9f), cush = mat(0xbfe0c8);
+  box(0.95, 0.44, 2.5, sofaC, -1.2, 0.22, -0.6); box(0.28, 0.78, 2.5, sofaC, -0.82, 0.78, -0.6);
+  for (const s of [-1, 1]) box(0.95, 0.62, 0.25, sofaC, -1.2, 0.31, -0.6 + s * 1.25);
+  for (const s of [-1, 1]) box(0.78, 0.14, 1.12, cush, -1.27, 0.5, -0.6 + s * 0.58);
+  for (const [s, c] of [[-1, 0xff9fb6], [1, 0xffd166]]) { const p = box(0.18, 0.42, 0.42, mat(c), -1.0, 0.74, -0.6 + s * 0.9); p.rotation.x = s * 0.25; }
+  houseBox(-1.15, -0.6, 0.5, 1.3);
+  // floor lamp
+  cyl(0.04, 0.05, 1.7, mat(0x4a4a5a), -1.0, 0.85, 1.3); cyl(0.2, 0.2, 0.04, mat(0x4a4a5a), -1.0, 0.02, 1.3);
+  lampBulbs.push(mesh(new THREE.CylinderGeometry(0.2, 0.34, 0.36, 12), mat(0xfff2c0, { emissive: 0xffd27a, emissiveIntensity: 0.2 }), -1.0, 1.75, 1.3, furnG, false));
+  houseCircle(-1.0, 1.3, 0.3);
+  // kitchen along the back wall + fridge
+  box(2.7, 0.9, 0.65, mat(0xf7e6d0), -4.35, 0.45, -3.95); box(2.8, 0.06, 0.72, wood, -4.35, 0.93, -3.95);
+  box(0.62, 0.03, 0.5, mat(0x3a3a44), -3.5, 0.97, -3.95, furnG, false);
+  for (const dx of [-0.14, 0.14]) cyl(0.09, 0.09, 0.01, mat(0xe05a4a), -3.5 + dx, 0.99, -3.95, furnG);
+  cyl(0.17, 0.15, 0.22, mat(0xff8fab), -3.5, 1.1, -3.95); box(0.55, 0.04, 0.42, mat(0xc9d6df), -4.8, 0.95, -3.95, furnG, false);
+  for (const s of [-1, 1]) box(0.07, 0.07, 0.4, mat(0xffffff), -5.35 + s * 0.12, 0.25, -3.6);
+  houseBox(-4.35, -3.95, 1.4, 0.38);
+  box(0.75, 1.8, 0.7, mat(0xdff1f7), -5.4, 0.9, -2.9); box(0.04, 0.5, 0.05, mat(0x9aa0a8), -5.0, 1.2, -2.65);
+  houseBox(-5.4, -2.9, 0.38, 0.36);
+  // bookshelf with books and a photo frame
+  box(1.7, 2.1, 0.45, mat(0xb5835a), 0.3, 1.05, -4.08);
+  const bookCols = [0xff8fab, 0x8fd8c0, 0xffd166, 0xc3a6ff, 0x7cc7ff, 0xf28c6b];
+  for (const y of [0.42, 1.06, 1.7]) { let x = -0.45; while (x < 0.95) { const w = 0.09 + Math.random() * 0.06, h = 0.34 + Math.random() * 0.16; box(w, h, 0.3, mat(bookCols[Math.floor(Math.random() * 6)]), x + w / 2, y + h / 2 - 0.17, -3.85, furnG, false); x += w + 0.015; } }
+  box(0.36, 0.3, 0.05, mat(0xffffff), 0.3, 2.27, -3.95); box(0.28, 0.22, 0.06, mat(0xffb3c6), 0.3, 2.27, -3.94, furnG, false);
+  houseBox(0.3, -4.08, 0.85, 0.25);
+  // bed for two
+  box(2.6, 0.35, 3.0, wood, BED.x, 0.175, BED.z);
+  box(2.4, 0.3, 2.8, mat(0xfffaf2), BED.x, 0.5, BED.z);
+  box(2.46, 0.1, 1.55, mat(0xffb3c6), BED.x, 0.7, BED.z + 0.6); box(2.47, 0.11, 0.22, mat(0xff8fab), BED.x, 0.7, BED.z + 0.05);
+  for (const s of [-1, 1]) box(0.85, 0.18, 0.48, mat(0xffffff), BED.x + s * 0.55, 0.74, BED.z - 1.08);
+  box(2.6, 1.3, 0.15, wood, BED.x, 0.85, BED.z - 1.52);
+  { const hg = new THREE.Group(); hg.position.set(BED.x, 1.25, BED.z - 1.43); furnG.add(hg);
+    for (const s of [-1, 1]) mesh(new THREE.SphereGeometry(0.13, 10, 8), mat(0xff6f9c), s * 0.1, 0.05, 0, hg, false);
+    const tip = mesh(new THREE.ConeGeometry(0.18, 0.26, 4), mat(0xff6f9c), 0, -0.13, 0, hg, false); tip.rotation.z = Math.PI; }
+  houseBox(BED.x, BED.z, BED.hx, BED.hz);
+  // nightstand + little lamp + photo
+  box(0.6, 0.6, 0.55, wood, 2.1, 0.3, -3.95); cyl(0.06, 0.08, 0.2, mat(0xfff1dd), 2.0, 0.7, -3.95);
+  lampBulbs.push(mesh(new THREE.CylinderGeometry(0.1, 0.17, 0.18, 10), mat(0xfff2c0, { emissive: 0xffd27a, emissiveIntensity: 0.2 }), 2.0, 0.88, -3.95, furnG, false));
+  const ph = box(0.22, 0.18, 0.03, mat(0xff8fab), 2.25, 0.7, -3.9); ph.rotation.y = 0.3;
+  houseBox(2.1, -3.95, 0.3, 0.28);
+  // dining table + chairs + flowers
+  cyl(0.7, 0.7, 0.06, wood, 3.5, 0.76, 2.3, furnG, 18); cyl(0.08, 0.12, 0.74, woodD, 3.5, 0.37, 2.3);
+  cyl(0.06, 0.08, 0.22, mat(0x8fd8c0), 3.5, 0.9, 2.3);
+  for (let i = 0; i < 5; i++) mesh(new THREE.SphereGeometry(0.06, 6, 6), mat([0xff8fab, 0xffd166, 0xffffff][i % 3]), 3.5 + Math.cos(i) * 0.07, 1.04 + (i % 2) * 0.04, 2.3 + Math.sin(i) * 0.07, furnG, false);
+  houseCircle(3.5, 2.3, 0.72);
+  for (const s of [-1, 1]) { box(0.45, 0.06, 0.45, wood, 3.5 + s * 0.95, 0.46, 2.3); box(0.06, 0.55, 0.45, wood, 3.5 + s * 1.15, 0.74, 2.3); for (const dz of [-0.18, 0.18]) for (const dx of [-0.18, 0.18]) box(0.05, 0.44, 0.05, woodD, 3.5 + s * 0.95 + dx, 0.22, 2.3 + dz); houseCircle(3.5 + s * 0.95, 2.3, 0.28); }
+  // plants in pots
+  for (const [x, z] of [[5.3, 3.8], [-5.3, 3.8], [5.3, -0.3]]) { cyl(0.26, 0.2, 0.42, mat(0xd8845a), x, 0.21, z); mesh(new THREE.IcosahedronGeometry(0.42, 0), mat(0x5fb34f), x, 0.75, z, furnG); houseCircle(x, z, 0.35); }
+  // mailbox (outside, right of the door) + chopping stump with firewood
+  cyl(0.06, 0.06, 1, mat(0x8a6a4a), 2.8, 0.5, 5.6, furnG, 6); box(0.4, 0.35, 0.55, mat(0xff8fab), 2.8, 1.1, 5.6);
+  mailboxPos = houseLocal(2.8, 5.6, 1.33); houseCircle(2.8, 5.6, 0.15);
+  cyl(0.45, 0.5, 0.5, mat(0x9b6b43), 7.3, 0.25, 1.5); cyl(0.43, 0.43, 0.02, mat(0xe6c28f), 7.3, 0.51, 1.5);
+  { const ax = box(0.06, 0.7, 0.06, woodD, 7.3, 0.8, 1.5); ax.rotation.z = 0.5; const blade = box(0.25, 0.16, 0.04, mat(0x9aa0a8), 7.12, 0.58, 1.5); blade.rotation.z = 0.5; }
+  for (const [x, z, r] of [[7.8, 2.3, 0.3], [6.9, 2.5, -0.5], [7.4, 2.5, 1.2]]) { const l = cyl(0.12, 0.12, 0.7, mat(0x9b6b43), x, 0.12, z, furnG, 8); l.rotation.set(0, r, Math.PI / 2); }
+  houseCircle(7.3, 1.5, 0.5);
+  houseLight = new THREE.PointLight(0xffd9a0, 0, 13, 1.3); houseLight.position.set(1.2, 2.6, 0); houseG.add(houseLight);
+  houseG.traverse(o => { if (o.isMesh) o.receiveShadow = true; });
 }
+function bedSlotPos(slot) { return houseLocal(BED.x + (slot ? 0.55 : -0.55), BED.z + 0.13, BED.top + 0.42); }
 // pond
 const POND = { x: 24, z: -22 };
 {
@@ -484,8 +592,10 @@ const benches = [
   { x: -70.2, z: PIER.z, ry: -Math.PI / 2 },  // 부두 끝
   { x: POND.x, z: POND.z + 5.1, ry: Math.PI }, // 연못
 ];
+{ const sp = houseLocal(-1.3, -0.6); benches.push({ x: sp.x, z: sp.z, ry: HOUSE.ry - Math.PI / 2, kind: 'sofa', indoor: true, seatY: 0.34, noMesh: true }); }
 for (const b of benches) {
   b.y = groundY(b.x, b.z); b.f = new THREE.Vector3(Math.sin(b.ry), 0, Math.cos(b.ry)); b.r = new THREE.Vector3(Math.cos(b.ry), 0, -Math.sin(b.ry));
+  if (b.noMesh) continue;
   const g = new THREE.Group(); g.position.set(b.x, b.y, b.z); g.rotation.y = b.ry; scene.add(g);
   mesh(new THREE.BoxGeometry(2.0, 0.1, 0.6), mat(0xc8875a), 0, 0.48, 0, g);
   mesh(new THREE.BoxGeometry(2.0, 0.5, 0.08), mat(0xc8875a), 0, 0.85, -0.3, g);
@@ -507,7 +617,7 @@ for (const d of [40, 135, 205, 255, -70]) rockPair(d); // look-alike rock pairs
 // forests & scatter
 {
   const r = rng(42);
-  const avoid = [[0, 0, 8], [HOUSE.x, HOUSE.z, 7], [POND.x, POND.z, 6.5], [0, 57, 4], [GIANT.x, GIANT.z, 4.2], [STUMP.x, STUMP.z, 3.2], [-59, 16, 4], [LIGHTHOUSE.x, LIGHTHOUSE.z, 4]];
+  const avoid = [[0, 0, 8], [HOUSE.x, HOUSE.z, 10], [POND.x, POND.z, 6.5], [0, 57, 4], [GIANT.x, GIANT.z, 4.2], [STUMP.x, STUMP.z, 3.2], [-59, 16, 4], [LIGHTHOUSE.x, LIGHTHOUSE.z, 4]];
   const ok = (x, z, gap) => Math.hypot(x, z) < R_GRASS - 2.5 && distToPaths(x, z) > 2.2 && !avoid.some(([ax, az, ar]) => Math.hypot(x - ax, z - az) < ar) && !colliders.some(c => Math.hypot(c.x - x, c.z - z) < gap);
   const forest = (cx, cz, rad, n, pick, gap) => { let placed = 0, tries = 0; while (placed < n && tries++ < 4000) { const a = r() * 6.28, d = Math.sqrt(r()) * rad, x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d; if (!ok(x, z, gap)) continue; tree(x, z, pick(), 0.9 + r() * 0.6); placed++; } };
   forest(GIANT.x, GIANT.z, 14, 60, () => (r() < 0.7 ? 2 : 0), 2.3);       // 분홍 숲
@@ -524,7 +634,7 @@ for (const d of [40, 135, 205, 255, -70]) rockPair(d); // look-alike rock pairs
     const ca = r() * 6.28, cd = 6 + r() * 52, cx = Math.cos(ca) * cd, cz = Math.sin(ca) * cd, k = 5 + Math.floor(r() * 10), col = cols[Math.floor(r() * cols.length)];
     for (let j = 0; j < k; j++) {
       const x = cx + (r() - 0.5) * 3, z = cz + (r() - 0.5) * 3;
-      if (Math.hypot(x, z) > R_GRASS - 1 || colliders.some(cc => Math.hypot(cc.x - x, cc.z - z) < cc.r + 0.3)) continue;
+      if (Math.hypot(x, z) > R_GRASS - 1 || Math.hypot(x - HOUSE.x, z - HOUSE.z) < 9.5 || colliders.some(cc => Math.hypot(cc.x - x, cc.z - z) < cc.r + 0.3)) continue;
       petals.push({ m: new THREE.Matrix4().makeTranslation(x, 0.32, z), c: col }); stems.push({ m: new THREE.Matrix4().makeTranslation(x, 0.15, z), c: 0x4f9d45 });
     }
   }
@@ -755,8 +865,8 @@ function setupCelebration(events) {
 /* =========================================================
    state
    ========================================================= */
-const me = { kind: null, a: null, pos: new THREE.Vector3(0, 0, 4), ry: Math.PI, moving: false, running: false, sit: null, holding: false, emote: -1 };
-const partner = { kind: null, a: null, pos: new THREE.Vector3(), target: new THREE.Vector3(), ry: 0, tRy: 0, moving: false, running: false, sit: null, holding: false, present: false, lastSeen: 0 };
+const me = { kind: null, a: null, pos: new THREE.Vector3(0, 0, 4), ry: Math.PI, moving: false, running: false, sit: null, lie: null, holding: false, emote: -1 };
+const partner = { kind: null, a: null, pos: new THREE.Vector3(), target: new THREE.Vector3(), ry: 0, tRy: 0, moving: false, running: false, sit: null, lie: null, lieRoll: 0, toss: 0, holding: false, present: false, lastSeen: 0 };
 let holdReqFrom = 0; // time until which partner's request is valid
 let modalOpen = false;
 const otherKind = (k) => (k === 'dog' ? 'cat' : 'dog');
@@ -770,6 +880,7 @@ addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (modalOpen) { if (['KeyE', 'Space', 'Escape', 'Enter'].includes(e.code)) closeLetter(); return; }
   if (e.code === 'KeyE' || e.code === 'Space') { e.preventDefault(); interact(); }
+  if (me.lie && !e.repeat) { if (e.code === 'KeyA' || e.code === 'ArrowLeft') toss(-1); if (e.code === 'KeyD' || e.code === 'ArrowRight') toss(1); }
   if (/^Digit[1-4]$/.test(e.code)) doEmote(+e.code.slice(5) - 1);
   if (e.code === 'KeyM') toggleMic();
   if (e.code === 'KeyP') takePhoto();
@@ -782,7 +893,7 @@ const joy = { x: 0, y: 0, id: null };
 {
   let drag = null;
   canvas.addEventListener('pointerdown', (e) => { drag = { id: e.pointerId, x: e.clientX }; canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { camYaw -= (e.clientX - drag.x) * 0.006; drag.x = e.clientX; } });
+  canvas.addEventListener('pointermove', (e) => { if (drag && drag.id === e.pointerId) { camYaw -= (e.clientX - drag.x) * 0.006; drag.x = e.clientX; camYawTo = null; } });
   const end = (e) => { if (drag && drag.id === e.pointerId) drag = null; };
   canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
   canvas.addEventListener('wheel', (e) => { camZoom = clamp(camZoom + e.deltaY * 0.001, 0.55, 1.7); }, { passive: true });
@@ -810,13 +921,19 @@ function nearestBench() {
 }
 function partnerDist() { return partner.present ? Math.hypot(partner.pos.x - me.pos.x, partner.pos.z - me.pos.z) : Infinity; }
 function currentAction() {
+  if (me.lie) return { icon: '🚶', text: document.body.classList.contains('touch') ? '일어나기 · 조이스틱 좌우로 뒤척뒤척' : '일어나기 · A/D 뒤척이기', fn: standUpBed };
   if (me.sit) return { icon: '🚶', text: '일어나기', fn: standUp };
   if (me.holding) return { icon: '🫳', text: '손 놓기', fn: () => { releaseHold(true); } };
   if (holdReqFrom > clock.elapsedTime && partnerDist() < 3.5) return { icon: '🤝', text: `${nick(partnerName())} 손 잡기 💕`, fn: acceptHold };
   const hi = HINTS.findIndex((h, i) => i <= hintProgress && Math.hypot(h.pos.x - me.pos.x, h.pos.z - me.pos.z) < 2.3);
   if (hi >= 0) return { icon: '🗒️', text: `쪽지 읽기 (${hi + 1}/${HINTS.length})`, fn: () => openHint(hi) };
   if (Math.hypot(letterSpot.x - me.pos.x, letterSpot.z - me.pos.z) < 2.2) return { icon: '💌', text: '반짝이는 병 열어보기', fn: openLetter };
-  const bi = nearestBench(); if (bi >= 0) return { icon: '🪑', text: '벤치에 앉기', fn: () => sitDown(bi) };
+  if (insideHouse(me.pos.x, me.pos.z)) {
+    const [lx, lz] = toHouseLocal(me.pos.x, me.pos.z);
+    if (Math.hypot(lx + 4.6, lz + 0.6) < 1.7) return { icon: '🪵', text: '장작 넣기 🔥', fn: addLog };
+    if (Math.max(Math.abs(lx - BED.x) - BED.hx, Math.abs(lz - BED.z) - BED.hz) < 1.1) return { icon: '🛏️', text: '침대에 눕기', fn: lieDown };
+  }
+  const bi = nearestBench(); if (bi >= 0) return benches[bi].kind === 'sofa' ? { icon: '🛋️', text: '소파에 앉기', fn: () => sitDown(bi) } : { icon: '🪑', text: '벤치에 앉기', fn: () => sitDown(bi) };
   if (partnerDist() < 2.6) return { icon: '🤝', text: `${nick(partnerName())}에게 손 내밀기`, fn: requestHold };
   return null;
 }
@@ -840,8 +957,36 @@ function sitDown(bi) {
   if (partner.sit && partner.sit[0] === bi) togetherOnBench();
 }
 function standUp() { const b = benches[me.sit[0]]; me.pos.set(me.pos.x + b.f.x * 0.9, 0, me.pos.z + b.f.z * 0.9); me.sit = null; }
+function lieDown() {
+  const taken = partner.present && partner.lie ? partner.lie.slot : -1;
+  const d0 = me.pos.distanceTo(bedSlotPos(0)), d1 = me.pos.distanceTo(bedSlotPos(1));
+  let slot = d0 < d1 ? 0 : 1; if (slot === taken) slot = 1 - slot;
+  releaseHold(true); me.sit = null;
+  me.lie = { slot, rollT: 0, roll: 0, toss: 0, idle: 0 }; me.pos.copy(bedSlotPos(slot));
+  if (partner.present && partner.lie) bothInBed();
+}
+function standUpBed() { const slot = me.lie.slot; me.lie = null; me.pos.copy(houseLocal(BED.x + (slot ? 0.55 : -0.55), BED.z + BED.hz + 0.75)); me.ry = HOUSE.ry; }
+function toss(dir) {
+  const L = me.lie; if (!L) return;
+  const nt = clamp(L.rollT + dir, -1, 1);
+  if (nt === L.rollT) L.rollT = -L.rollT || dir; else L.rollT = nt;   // at the edge: roll over to the other side
+  L.toss = 0.5; L.idle = 0;
+  if (facingEachOther()) { toast('💕 서로 마주 보는 중', 1800); for (let i = 0; i < 6; i++) spawnHeart(me.pos.clone().lerp(partner.pos, 0.5), 0.3, 0.5); }
+}
+function facingEachOther() {
+  if (!me.lie || !partner.present || !partner.lie) return false;
+  const mine = me.lie.rollT, theirs = partner.lie.rollT;
+  return me.lie.slot === 0 ? mine > 0 && theirs < 0 : mine < 0 && theirs > 0;
+}
+function bothInBed() { toast('🛏️ 같이 누웠어요 💕', 2600); for (let i = 0; i < 10; i++) setTimeout(() => spawnHeart(me.pos.clone().lerp(partner.pos, 0.5), 0.4, 0.6), i * 120); }
+let fireBoost = 0;
+function addLog(remote) {
+  fireBoost = 8; if (!remote) { send({ t: 'fire' }); toast('🔥 타닥타닥...', 1600); }
+  for (let i = 0; i < 18; i++) spawnEmber(true);
+}
 function togetherOnBench() {
   const h = currentHour();
+  if (me.sit && benches[me.sit[0]].kind === 'sofa') { toast('🔥 같이 불멍 중...', 3500); for (let i = 0; i < 10; i++) setTimeout(() => spawnHeart(me.pos.clone().lerp(partner.pos, 0.5), 0.4, 1.3), i * 150); return; }
   toast(h >= 17 && h < 19.5 ? '🌅 같이 노을 보는 중...' : night > 0.5 ? '🌙 같이 별 보는 중...' : '🌊 같이 바다 보는 중...', 3500);
   for (let i = 0; i < 10; i++) setTimeout(() => spawnHeart(me.pos.clone().lerp(partner.pos, 0.5), 0.4, 1.3), i * 150);
 }
@@ -1063,7 +1208,7 @@ function onData(m) {
     case 'hi': {
       const k = m.kind === 'dog' || m.kind === 'cat' ? m.kind : otherKind(me.kind);
       if (!partner.a || partner.kind !== k) { if (partner.a) scene.remove(partner.a.root); partner.kind = k; partner.a = makeAnimal(k); }
-      partner.a.root.visible = true; partner.present = true; partner.sit = null; partner.holding = false;
+      partner.a.root.visible = true; partner.present = true; partner.sit = null; partner.lie = null; partner.holding = false;
       const nm = CONFIG.players[k].name;
       setStatus(`💞 ${nick(nm)}와 함께`, true); toast(`${subj(nm)} 섬에 왔어요! 💕`);
       if (m.kind === me.kind) toast('둘 다 같은 캐릭터로 들어왔어요! 한 명이 다시 골라 주세요 🙈', 5000);
@@ -1082,6 +1227,11 @@ function onData(m) {
       if (!partner.a) return;
       partner.target.set(+m.x || 0, 0, +m.z || 0); partner.tRy = +m.ry || 0; partner.moving = !!m.mv; partner.running = !!m.rn;
       partner.sit = Array.isArray(m.sit) ? m.sit : null; partner.holding = !!m.hd;
+      { const wasLying = !!partner.lie, L = Array.isArray(m.lie) ? { slot: m.lie[0] ? 1 : 0, rollT: clamp(m.lie[1] | 0, -1, 1) } : null;
+        if (L && partner.lie && L.rollT !== partner.lie.rollT) partner.toss = 0.5;
+        const turned = L && partner.lie && L.rollT !== partner.lie.rollT;
+        partner.lie = L; if (L && !wasLying && me.lie) bothInBed();
+        if (turned && facingEachOther()) { toast('💕 서로 마주 보는 중', 1800); for (let i = 0; i < 6; i++) spawnHeart(me.pos.clone().lerp(partner.pos, 0.5), 0.3, 0.5); } }
       if (!partner.seen) { partner.pos.copy(partner.target); partner.ry = partner.tRy; partner.seen = true; }
       break;
     case 'emote': if (partner.a) showEmote(partner.a, m.i | 0); break;
@@ -1090,13 +1240,14 @@ function onData(m) {
     case 'holdRelease': me.holding = false; break;
     case 'hint': if ((m.n | 0) > hintProgress) { setHintProgress(m.n); toast(`🗒️ ${subj(partnerName())} 쪽지 ${hintProgress}을 찾았어요!`, 3500); } break;
     case 'letter': toast(`💌 ${subj(partnerName())} 숨겨진 편지를 찾았어요!`, 4000); break;
+    case 'fire': addLog(true); break;
     case 'rec': partnerRec = !!(m.on | 0); updateRecUI(); break;
   }
 }
 let sendAcc = 0;
 function netTick(dt) {
   sendAcc += dt; if (sendAcc < 1 / 15) return; sendAcc = 0;
-  send({ t: 's', x: +me.pos.x.toFixed(3), z: +me.pos.z.toFixed(3), ry: +me.ry.toFixed(3), mv: me.moving ? 1 : 0, rn: me.running ? 1 : 0, sit: me.sit, hd: me.holding ? 1 : 0 });
+  send({ t: 's', x: +me.pos.x.toFixed(3), z: +me.pos.z.toFixed(3), ry: +me.ry.toFixed(3), mv: me.moving ? 1 : 0, rn: me.running ? 1 : 0, sit: me.sit, lie: me.lie ? [me.lie.slot, me.lie.rollT] : null, hd: me.holding ? 1 : 0 });
 }
 
 /* =========================================================
@@ -1105,10 +1256,39 @@ function netTick(dt) {
 const clock = new THREE.Clock();
 const camPos = new THREE.Vector3(0, 12, 16), camLook = new THREE.Vector3();
 const linkMesh = mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 6), mat(0xff8fab), 0, 0, 0, scene, false); linkMesh.visible = false;
-let heartAcc = 0, fwAcc = 0, skyAcc = 99, occAcc = 0;
+let heartAcc = 0, fwAcc = 0, skyAcc = 99, occAcc = 0, emberAcc = 0, smokeAcc = 0, wasInHouse = false, camYawTo = null;
+const _qH = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), HOUSE.ry), _qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2), _qR = new THREE.Quaternion(), _Y = new THREE.Vector3(0, 1, 0);
+function lieQuat(roll) { return _qH.clone().multiply(_qX).multiply(_qR.setFromAxisAngle(_Y, roll)); }
+// fireplace embers and chimney smoke
+const particles = [];
+function spawnEmber(big) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, color: Math.random() > 0.5 ? 0xffb13b : 0xff7a2e, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  s.position.copy(houseLocal(-4.85, -0.6 + (Math.random() - 0.5) * 0.6, 0.5)); s.scale.setScalar(big ? 0.14 : 0.09);
+  s.userData = { life: 0, max: 1 + Math.random(), vx: (Math.random() - 0.4) * 0.5, vy: 0.9 + Math.random() * (big ? 1.4 : 0.6), grow: 0 };
+  scene.add(s); particles.push(s);
+}
+function spawnSmoke() {
+  if (particles.length > 60) return;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, color: 0xeeeeee, transparent: true, opacity: 0.5, depthWrite: false }));
+  s.position.copy(chimneyTop); s.scale.setScalar(0.6);
+  s.userData = { life: 0, max: 4.5, vx: 0.25, vy: 0.8, grow: 0.5, smoke: true };
+  scene.add(s); particles.push(s);
+}
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i], u = p.userData; u.life += dt;
+    p.position.x += u.vx * dt; p.position.y += u.vy * dt; if (u.grow) p.scale.addScalar(u.grow * dt);
+    p.material.opacity = (u.smoke ? 0.5 : 1) * (1 - u.life / u.max);
+    if (u.life > u.max) { scene.remove(p); p.material.dispose(); particles.splice(i, 1); }
+  }
+}
 
 function moveMe(dt) {
-  if (me.sit || modalOpen) { me.moving = false; return; }
+  if (me.lie) { // joystick left/right = toss
+    const jx = joy.x, side = jx > 0.6 ? 1 : jx < -0.6 ? -1 : 0;
+    if (side && side !== joyTossSide) toss(side); joyTossSide = side;
+  }
+  if (me.sit || me.lie || modalOpen) { me.moving = false; return; }
   let ix = 0, iz = 0;
   if (keys.KeyW || keys.ArrowUp) iz -= 1; if (keys.KeyS || keys.ArrowDown) iz += 1;
   if (keys.KeyA || keys.ArrowLeft) ix -= 1; if (keys.KeyD || keys.ArrowRight) ix += 1;
@@ -1133,9 +1313,20 @@ function moveMe(dt) {
     }
   }
 }
+let joyTossSide = 0;
 function tryMove(dx, dz) {
   let nx = me.pos.x + dx, nz = me.pos.z + dz;
-  for (const c of colliders) { const ox = nx - c.x, oz = nz - c.z, d = Math.hypot(ox, oz), min = c.r + 0.4; if (d < min && d > 1e-4) { nx = c.x + (ox / d) * min; nz = c.z + (oz / d) * min; } }
+  for (const c of colliders) {
+    if (c.box) { // oriented box (walls, furniture)
+      const cs = Math.cos(c.rot), sn = Math.sin(c.rot), ox = nx - c.x, oz = nz - c.z;
+      let lx = ox * cs - oz * sn, lz = ox * sn + oz * cs; const ex = c.hx + 0.4, ez = c.hz + 0.4;
+      if (Math.abs(lx) < ex && Math.abs(lz) < ez) {
+        if (ex - Math.abs(lx) < ez - Math.abs(lz)) lx = Math.sign(lx || 1) * ex; else lz = Math.sign(lz || 1) * ez;
+        nx = c.x + lx * cs + lz * sn; nz = c.z - lx * sn + lz * cs;
+      }
+      continue;
+    }
+    const ox = nx - c.x, oz = nz - c.z, d = Math.hypot(ox, oz), min = c.r + 0.4; if (d < min && d > 1e-4) { nx = c.x + (ox / d) * min; nz = c.z + (oz / d) * min; } }
   if (walkable(nx, nz)) { me.pos.x = nx; me.pos.z = nz; }
   else if (walkable(nx, me.pos.z)) me.pos.x = nx;
   else if (walkable(me.pos.x, nz)) me.pos.z = nz;
@@ -1147,17 +1338,32 @@ function loop() {
   fpsN++; fpsT += dt; if (fpsT > 1) { fpsVal = fpsN / fpsT; fpsN = 0; fpsT = 0; }
   if (me.a) {
     moveMe(dt);
-    me.pos.y = me.sit ? benches[me.sit[0]].y + 0.2 : groundY(me.pos.x, me.pos.z);
-    me.a.root.position.copy(me.pos); me.a.root.rotation.y = me.ry;
+    if (me.lie) {
+      const L = me.lie; L.roll = lerp(L.roll, L.rollT * 1.3, Math.min(1, dt * 7)); L.toss = Math.max(0, L.toss - dt); L.idle += dt;
+      me.pos.copy(bedSlotPos(L.slot)); me.a.root.position.copy(me.pos);
+      me.a.root.position.y += Math.sin((L.toss / 0.5) * Math.PI) * 0.12;
+      me.a.root.quaternion.copy(lieQuat(L.roll + Math.sin(L.toss * 28) * 0.12 * (L.toss > 0)));
+      if (L.idle > 15) { L.idle = 0; doEmote(3); }
+    } else {
+      me.pos.y = me.sit ? benches[me.sit[0]].y + (benches[me.sit[0]].seatY ?? 0.2) : groundY(me.pos.x, me.pos.z);
+      me.a.root.position.copy(me.pos); me.a.root.rotation.set(0, me.ry, 0);
+    }
     me.a.speaking = micOn && level(localAn) > 0.04;
     animateAnimal(me.a, dt, t, me.moving, me.running, !!me.sit);
 
     if (partner.present && partner.a) {
       if (partner.sit) { const b = benches[partner.sit[0]]; partner.target.copy(seatPos(partner.sit[0], partner.sit[1])); partner.tRy = b.ry; }
+      if (partner.lie) partner.target.copy(bedSlotPos(partner.lie.slot));
       const k = 1 - Math.exp(-dt * 12); partner.pos.x = lerp(partner.pos.x, partner.target.x, k); partner.pos.z = lerp(partner.pos.z, partner.target.z, k);
       let d = partner.tRy - partner.ry; d = Math.atan2(Math.sin(d), Math.cos(d)); partner.ry += d * k;
-      partner.pos.y = partner.sit ? benches[partner.sit[0]].y + 0.2 : groundY(partner.pos.x, partner.pos.z);
-      partner.a.root.position.copy(partner.pos); partner.a.root.rotation.y = partner.ry;
+      if (partner.lie) {
+        partner.pos.copy(bedSlotPos(partner.lie.slot)); partner.lieRoll = lerp(partner.lieRoll, partner.lie.rollT * 1.3, Math.min(1, dt * 7)); partner.toss = Math.max(0, partner.toss - dt);
+        partner.a.root.position.copy(partner.pos); partner.a.root.position.y += Math.sin((partner.toss / 0.5) * Math.PI) * 0.12;
+        partner.a.root.quaternion.copy(lieQuat(partner.lieRoll + Math.sin(partner.toss * 28) * 0.12 * (partner.toss > 0)));
+      } else {
+        partner.pos.y = partner.sit ? benches[partner.sit[0]].y + (benches[partner.sit[0]].seatY ?? 0.2) : groundY(partner.pos.x, partner.pos.z);
+        partner.a.root.position.copy(partner.pos); partner.a.root.rotation.set(0, partner.ry, 0);
+      }
       partner.a.speaking = level(remoteAn) > 0.04;
       animateAnimal(partner.a, dt, t, partner.moving, partner.running, !!partner.sit);
       const pd = partnerDist(); remoteAudio.volume = pd < 6 ? 1 : Math.max(0.35, 1 - (pd - 6) / 40);
@@ -1169,12 +1375,23 @@ function loop() {
       linkMesh.position.copy(mid); linkMesh.scale.set(1, len, 1); linkMesh.lookAt(b); linkMesh.rotateX(Math.PI / 2); linkMesh.visible = true;
       heartAcc += dt; if (heartAcc > 0.7) { heartAcc = 0; spawnHeart(mid, 0.2, 0.6); }
     } else linkMesh.visible = false;
+    if (me.lie && partner.present && partner.lie) { heartAcc += dt; if (heartAcc > (facingEachOther() ? 0.5 : 1.1)) { heartAcc = 0; spawnHeart(me.pos.clone().lerp(partner.pos, 0.5), 0.3, 0.6); } }
     // both on the same bench
     if (me.sit && partner.present && partner.sit && partner.sit[0] === me.sit[0]) { heartAcc += dt; if (heartAcc > 0.9) { heartAcc = 0; spawnHeart(me.pos.clone().lerp(partner.pos, 0.5), 0.3, 1.5); } }
 
     // camera
     let wantPos, wantLook;
-    if (me.sit) {
+    const inHouse = insideHouse(me.pos.x, me.pos.z);
+    if (inHouse && !wasInHouse) camYawTo = HOUSE.ry + 0.55;   // swing to a front view of the room
+    wasInHouse = inHouse;
+    if (camYawTo !== null) { let d = camYawTo - camYaw; d = Math.atan2(Math.sin(d), Math.cos(d)); camYaw += d * Math.min(1, dt * 4); if (Math.abs(d) < 0.01) camYawTo = null; }
+    wallsG.scale.y = lerp(wallsG.scale.y, inHouse ? 0.26 : 1, Math.min(1, dt * 6)); roofG.visible = wallsG.scale.y > 0.85;
+    if (inHouse) {
+      const off = new THREE.Vector3(Math.sin(camYaw) * 6.2, 9.5, Math.cos(camYaw) * 6.2).multiplyScalar(camZoom);
+      const focus = new THREE.Vector3(me.pos.x, 0, me.pos.z);
+      if (me.holding && partner.present) focus.lerp(new THREE.Vector3(partner.pos.x, 0, partner.pos.z), 0.5);
+      wantPos = focus.clone().add(off); wantLook = focus.clone().add(new THREE.Vector3(0, 0.6, 0));
+    } else if (me.sit) {
       const b = benches[me.sit[0]]; const c = new THREE.Vector3(b.x, b.y, b.z);
       wantPos = c.clone().addScaledVector(b.f, -4.8).add(new THREE.Vector3(0, 2.6, 0));
       wantLook = c.clone().addScaledVector(b.f, 8).add(new THREE.Vector3(0, 1.2, 0));
@@ -1202,6 +1419,13 @@ function loop() {
   foam.position.y = -0.47 + Math.sin(t * 1.3) * 0.05; foam.material.opacity = 0.5 + Math.sin(t * 1.3) * 0.2;
   { const sp = sparkle.geometry.attributes.position, sd = sparkle.userData.seed; for (let i = 0; i < sd.length; i++) { const [a, r, ph] = sd[i], h = ((t * 0.4 + r) % 1); sp.array[i * 3] = Math.cos(a + t * 0.5) * 0.5; sp.array[i * 3 + 1] = 0.2 + h * 1.2; sp.array[i * 3 + 2] = Math.sin(a + t * 0.5) * 0.5; } sp.needsUpdate = true; sparkle.material.opacity = 0.6 + Math.sin(t * 4) * 0.3; }
   bottle.position.y = letterSpot.y + Math.sin(t * 2) * 0.02;
+  fireBoost = Math.max(0, fireBoost - dt); const fb = fireBoost > 0 ? 1 + Math.min(1, fireBoost / 2) * 0.8 : 1;
+  for (const f of flames) { const u = f.userData; f.scale.set(fb * (0.9 + Math.sin(t * 9 + u.ph) * 0.1), fb * (0.85 + Math.sin(t * 13 + u.ph) * 0.2 + Math.random() * 0.08), fb); f.position.y = 0.3 + u.base * 0.5 * f.scale.y; }
+  fireLight.intensity = (4.5 + Math.sin(t * 11) * 0.8 + Math.random() * 0.6) * fb;
+  houseLight.intensity = insideHouse(camLook.x, camLook.z) ? 2.5 + night * 7 : night * 3;
+  emberAcc += dt; if (emberAcc > (fireBoost > 0 ? 0.08 : 0.5)) { emberAcc = 0; spawnEmber(false); }
+  smokeAcc += dt; if (smokeAcc > (fireBoost > 0 ? 0.25 : 0.6)) { smokeAcc = 0; spawnSmoke(); }
+  updateParticles(dt);
   for (const h of HINTS) { if (!h.obj.visible) continue; const a = h.spark.geometry.attributes.position; h.seed.forEach(([ang, r0], i) => { const k = (t * 0.5 + r0) % 1; a.array[i * 3] = Math.cos(ang + t) * 0.35; a.array[i * 3 + 1] = 0.15 + k * 0.8; a.array[i * 3 + 2] = Math.sin(ang + t) * 0.35; }); a.needsUpdate = true; h.obj.rotation.y = Math.sin(t * 1.5) * 0.2; }
   for (const b of balloons) { if (b.userData.cake) b.traverse(o => { if (o.userData.flame) o.scale.setScalar(0.8 + Math.random() * 0.5); }); else b.position.y = Math.sin(t * 1.5 + b.userData.ph) * 0.15; }
   if (celebrating) { fwAcc += dt; if (fwAcc > (night > 0.5 ? 0.9 : 1.8)) { fwAcc = 0; launchFirework(); } }
@@ -1247,7 +1471,7 @@ addEventListener('beforeunload', () => { try { peer && peer.destroy(); } catch {
 
 applySky();
 camPos.set(0, 14, 22); camLook.set(0, 0, 0);
-window.__game = { HINTS, colliders, walkable, tryMove, get hints() { return hintProgress; }, fps: () => fpsVal, me, partner, benches, letterSpot, send, interact, get conn() { return conn; }, get isHost() { return isHost; } };
+window.__game = { HOUSE, BED, houseLocal, insideHouse, lieDown, toss, bedSlotPos, HINTS, colliders, walkable, tryMove, get hints() { return hintProgress; }, fps: () => fpsVal, me, partner, benches, letterSpot, send, interact, get conn() { return conn; }, get isHost() { return isHost; } };
 requestAnimationFrame(loop);
 </script>
 </body>
