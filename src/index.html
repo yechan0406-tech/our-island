@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>우리의 섬</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Jua&family=Gaegu:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --cream:#fff8ef; --ink:#4a3b35; --ink-soft:#8a7468; --pink:#ff8fab; --pink-deep:#f06292;
+  --mint:#8fd8c0; --sky:#9fd8f5; --card:rgba(255,250,243,.94); --line:#f1dfcf;
+  --shadow:0 6px 24px rgba(74,59,53,.18);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:#9fd8f5;color:var(--ink);
+  font-family:'Jua',system-ui,-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;user-select:none;-webkit-user-select:none}
+canvas#game{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+button{font-family:inherit;color:inherit;cursor:pointer;border:none}
+.hidden{display:none!important}
+
+/* ---------- title ---------- */
+#title{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;
+  background:radial-gradient(circle at 50% 30%,rgba(255,255,255,.55),rgba(159,216,245,.2) 60%);z-index:20}
+.title-card{background:var(--card);border-radius:28px;box-shadow:var(--shadow);padding:28px 24px;width:min(460px,100%);text-align:center}
+.title-card h1{margin:0 0 4px;font-size:34px;letter-spacing:1px}
+.title-card .sub{color:var(--ink-soft);margin:0 0 20px;font-size:16px}
+.chars{display:flex;gap:12px;justify-content:center;margin-bottom:18px}
+.char{flex:1;max-width:170px;background:#fff;border:3px solid var(--line);border-radius:22px;padding:14px 8px;transition:.15s}
+.char .emoji{font-size:48px;line-height:1.1}
+.char .nm{font-size:22px;margin-top:6px}
+.char .an{font-size:14px;color:var(--ink-soft)}
+.char.sel{border-color:var(--pink);background:#fff0f4;transform:translateY(-3px)}
+.go{width:100%;padding:15px;border-radius:18px;background:var(--pink);color:#fff;font-size:22px;box-shadow:0 4px 0 var(--pink-deep)}
+.go:active{transform:translateY(3px);box-shadow:none}
+.go:disabled{opacity:.5}
+.tiny{font-size:13px;color:var(--ink-soft);margin-top:14px;line-height:1.6}
+.solo{background:none;color:var(--ink-soft);font-size:15px;margin-top:10px;text-decoration:underline}
+
+/* ---------- hud ---------- */
+#hud{position:fixed;inset:0;pointer-events:none;z-index:5}
+#hud > *{pointer-events:auto}
+.pill{background:var(--card);border-radius:999px;padding:8px 14px;box-shadow:var(--shadow);font-size:16px}
+#topLeft{position:absolute;top:calc(12px + env(safe-area-inset-top));left:12px;display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+#dday{font-size:18px}
+#status{font-size:14px;color:var(--ink-soft)}
+#status.ok{color:#2e9e7a}
+#banner{position:absolute;top:calc(14px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);
+  background:linear-gradient(135deg,#ffd1dc,#ffe8b8);border-radius:20px;padding:10px 22px;box-shadow:var(--shadow);
+  font-size:22px;text-align:center;max-width:calc(100% - 32px);animation:float 3s ease-in-out infinite}
+@keyframes float{50%{transform:translateX(-50%) translateY(-4px)}}
+@media (max-width:700px){#banner{top:calc(112px + env(safe-area-inset-top));font-size:17px;padding:8px 16px}#topLeft .pill{font-size:14px;padding:6px 12px}#dday{font-size:15px!important}}
+#prompt{position:absolute;bottom:calc(150px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);font-size:18px;white-space:nowrap}
+#toast{position:absolute;top:30%;left:50%;transform:translateX(-50%);font-size:19px;text-align:center;max-width:calc(100% - 32px);
+  transition:opacity .4s;opacity:0}
+#toast.show{opacity:1}
+#actions{position:absolute;right:calc(14px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.row{display:flex;gap:8px}
+.ib{width:48px;height:48px;border-radius:50%;background:var(--card);box-shadow:var(--shadow);font-size:22px;display:flex;align-items:center;justify-content:center}
+.ib:active{transform:scale(.92)}
+.ib.off{opacity:.55}
+#actBtn{width:78px;height:78px;border-radius:50%;background:var(--pink);color:#fff;font-size:30px;box-shadow:0 5px 0 var(--pink-deep),var(--shadow)}
+#actBtn:active{transform:translateY(4px);box-shadow:var(--shadow)}
+#actBtn.dim{background:#d8c7bd;box-shadow:0 5px 0 #bfa99b}
+#keys{position:absolute;left:12px;bottom:calc(12px + env(safe-area-inset-bottom));font-size:13px;color:var(--ink-soft);line-height:1.6;padding:10px 14px;border-radius:16px}
+body.touch #keys{display:none}
+
+/* ---------- joystick ---------- */
+#joy{position:absolute;left:calc(20px + env(safe-area-inset-left));bottom:calc(24px + env(safe-area-inset-bottom));width:130px;height:130px;border-radius:50%;
+  background:rgba(255,250,243,.45);border:3px solid rgba(255,255,255,.8);display:none;touch-action:none}
+body.touch #joy{display:block}
+#knob{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:var(--card);box-shadow:var(--shadow)}
+
+/* ---------- letter ---------- */
+#letter{position:fixed;inset:0;background:rgba(74,59,53,.35);display:flex;align-items:center;justify-content:center;padding:16px;z-index:30}
+.paper{background:#fffdf6;background-image:repeating-linear-gradient(transparent 0 38px,#f4e4d4 38px 40px);
+  border-radius:12px;box-shadow:var(--shadow);width:min(400px,100%);padding:30px 26px 22px;transform:rotate(-1.5deg);animation:pop .5s cubic-bezier(.2,1.6,.4,1)}
+@keyframes pop{from{transform:scale(.4) rotate(-8deg);opacity:0}}
+.paper .to{font-family:'Gaegu',cursive;font-size:22px;color:var(--ink-soft)}
+.paper .body{font-family:'Gaegu',cursive;font-weight:700;font-size:34px;line-height:40px;margin:16px 0 18px;white-space:pre-wrap;color:#d94f7a}
+.paper .from{font-family:'Gaegu',cursive;font-size:22px;text-align:right;color:var(--ink-soft)}
+.paper button{display:block;margin:18px auto 0;padding:10px 26px;border-radius:14px;background:var(--pink);color:#fff;font-size:18px}
+.secret{text-align:center;font-size:20px;line-height:1.6;color:var(--ink);font-family:'Jua',sans-serif}
+.secret small{display:block;color:var(--ink-soft);font-size:14px;margin-top:8px}
+.ghost{background:none!important;color:var(--ink-soft)!important;text-decoration:underline;font-size:14px!important;margin-top:6px!important;padding:4px!important}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="topLeft">
+    <div id="dday" class="pill">💕 우리 D+1</div>
+    <div id="status" class="pill">연결 중...</div>
+  </div>
+  <div id="banner" class="hidden"></div>
+  <div id="prompt" class="pill hidden"></div>
+  <div id="toast" class="pill"></div>
+  <div id="keys" class="pill">
+    이동 WASD·방향키 · 달리기 Shift<br>
+    상호작용 E·Space · 감정표현 1~4<br>
+    마이크 M · 사진 P · 드래그 회전 · 휠 줌
+  </div>
+  <div id="joy"><div id="knob"></div></div>
+  <div id="actions">
+    <div class="row">
+      <button class="ib" data-emote="0" title="하트 (1)">❤️</button>
+      <button class="ib" data-emote="1" title="웃음 (2)">😆</button>
+      <button class="ib" data-emote="2" title="인사 (3)">👋</button>
+      <button class="ib" data-emote="3" title="졸려 (4)">😴</button>
+    </div>
+    <div class="row" style="align-items:center">
+      <button class="ib" id="photoBtn" title="사진 (P)">📷</button>
+      <button class="ib" id="micBtn" title="마이크 (M)">🎙️</button>
+      <button id="actBtn" class="dim" title="상호작용 (E)">✋</button>
+    </div>
+  </div>
+</div>
+
+<div id="title">
+  <div class="title-card">
+    <h1>🏝️ 우리의 섬</h1>
+    <p class="sub">예찬 &amp; 예형의 작은 섬</p>
+    <div class="chars">
+      <button class="char" data-who="dog"><div class="emoji">🐶</div><div class="nm">예찬</div><div class="an">강아지</div></button>
+      <button class="char" data-who="cat"><div class="emoji">🐱</div><div class="nm">예형</div><div class="an">고양이</div></button>
+    </div>
+    <button class="go" id="goBtn" disabled>누구로 들어갈까요?</button>
+    <button class="solo" id="soloBtn">혼자 둘러보기</button>
+    <div class="tiny">먼저 들어온 사람이 섬을 열고, 다음 사람이 자동으로 놀러 와요.<br>마이크를 허용하면 서로 목소리로 얘기할 수 있어요 🎙️</div>
+  </div>
+</div>
+
+<div id="letter" class="hidden"><div class="paper" id="paper"></div></div>
+
+<script>/*__THREE__*/</script>
+<script>/*__PEER__*/</script>
+<script>/*__GAME__*/</script>
+</body>
+</html>
