@@ -10,7 +10,7 @@ const CONFIG = {
   },
   anniversary: '2026-11-19',               // 사귄 날 (이 날이 1일)
   birthdays: { dog: [4, 6], cat: [8, 2] },  // [월, 일]
-  letter: { to: 'cat', from: 'dog', text: '형이야 사랑해 ♥' },
+  letter: { to: 'cat', from: 'dog', text: '예형아 사랑해 ♥' },
   room: 'yy-ourisland-1119',                // 둘만의 방 이름 (바꾸면 새 섬)
 };
 
